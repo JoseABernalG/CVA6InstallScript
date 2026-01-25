@@ -1,17 +1,19 @@
 #!/bin/bash
-##Script to install CVA6
+set -e
 
+echo "=== CVA6 Toolchain Installer ==="
+
+# -------------------------------
+# Threads
+# -------------------------------
 read -p "Use all available threads? (y/n): " opti
 
 case "$opti" in
     y|Y)
-        # Use all available threads
-        export NUM_JOBS=$(nproc)
+        NUM_JOBS=$(nproc)
         ;;
     n|N)
-        # Use 8 threads
         read -p "Enter number of threads: " NUM_JOBS
-        export NUM_JOBS
         ;;
     *)
         echo "Not valid answer."
@@ -19,62 +21,63 @@ case "$opti" in
         ;;
 esac
 
+export NUM_JOBS
 echo "Using $NUM_JOBS threads"
 
-#Install Prerequisites
-echo -e "Installing prerequisites...\n"
+# -------------------------------
+# Prerequisites
+# -------------------------------
+echo "Installing prerequisites..."
 
-sudo apt-get install autoconf
-sudo apt-get install automake
-sudo apt-get install autotools-dev
-sudo apt-get install curl
-sudo apt-get install git
-sudo apt-get install libmpc-dev
-sudo apt-get install libmpfr-dev
-sudo apt-get install libgmp-dev
-sudo apt-get install gawk
-sudo apt-get install build-essential
-sudo apt-get install bison
-sudo apt-get install flex
-sudo apt-get install texinfo
-sudo apt-get install gperf
-sudo apt-get install libtool
-sudo apt-get install bc
-sudo apt-get install zlib1g-dev
+sudo apt-get update
+sudo apt-get install -y \
+    autoconf automake autotools-dev curl git \
+    libmpc-dev libmpfr-dev libgmp-dev gawk \
+    build-essential bison flex texinfo gperf \
+    libtool bc zlib1g-dev help2man device-tree-compiler \
+    python3 python3-pip python3-venv
 
+# -------------------------------
+# CVA6 directory
+# -------------------------------
+echo
+read -p "Path to CVA6 repository (e.g. ~/cva6): " CVA6_DIR
+CVA6_DIR="${CVA6_DIR/#\~/$HOME}"
 
-##Setting up environment variables
-echo -e "Setting up environment variables\n"
+[ -d "$CVA6_DIR/util/toolchain-builder" ] || {
+    echo "Invalid CVA6 directory"
+    exit 1
+}
 
-echo -e "path to the cva6 installation directory\n"
+export CVA6_DIR
 
-echo -e "example: '/home/user/Documents/cva6' \n"
+echo "Initializing CVA6 submodules..."
+cd "$CVA6_DIR"
+git submodule update --init --recursive
 
-read ins
+# -------------------------------
+# RISCV install directory
+# -------------------------------
+read -p "Path to RISC-V toolchain install directory (e.g. ~/riscv): " RISCV
+RISCV="${RISCV/#\~/$HOME}"
 
-#echo $ins
-
-export RISCV="$ins"w
-
-#echo $RISCV
-
+export RISCV
 INSTALL_DIR="$RISCV"
+export INSTALL_DIR
 
-#echo $INSTALL_DIR
+mkdir -p "$INSTALL_DIR"
 
-echo -e "Do you want to set a custom config name? (y/n)\nDefault => gcc-13.3.0-BareMetal \n"
-read opti
+# -------------------------------
+# Config name
+# -------------------------------
+read -p "Custom config name? (y/n) [default: gcc-13.3.0-BareMetal]: " opti
 
 case "$opti" in
     y|Y)
-        # Using custom name
-        read -p "Enter custom config name: " cfgnm
-        export CONFIG_NAME="$cfgnm"
+        read -p "Enter custom config name: " CONFIG_NAME
         ;;
-    n|N)
-        # Use default config name
-        echo -e "Using default \n "
-        export CONFIG_NAME="gcc-13.3.0-BareMetal"
+    n|N|"")
+        CONFIG_NAME="gcc-13.3.0-BareMetal"
         ;;
     *)
         echo "Not valid answer."
@@ -82,24 +85,88 @@ case "$opti" in
         ;;
 esac
 
-echo -e "Using $CONFIG_NAME \n"
+export CONFIG_NAME
+echo "Using config: $CONFIG_NAME"
 
-echo -e "INSTALL_DIR = $Config_NAME located in $RISCV \n"
+# -------------------------------
+# Fetch toolchain
+# -------------------------------
+echo "Fetching toolchain sources..."
+bash "$CVA6_DIR/util/toolchain-builder/get-toolchain.sh"
 
-##Fetch the source code of the toolchain (assumes Internet access.)
-##bash get-toolchain.sh
-echo -e "Fetching toolchain...\n"
+# -------------------------------
+# Apply patch (idempotent)
+# -------------------------------
+echo "Applying CVA6 GCC patch..."
+cd "$CVA6_DIR/util/toolchain-builder/src/gcc"
 
-bash "$INSTALL_DIR"/util/toolchain-builder/get-toolchain.sh
+if git apply --check ../../gcc-cva6-tune.patch 2>/dev/null; then
+    git apply ../../gcc-cva6-tune.patch
+else
+    echo "Patch already applied or not applicable, skipping."
+fi
 
-#echo -e "$INSTALL_DIR/util/toolchain-builder/get-toolchain.sh\n"
+# -------------------------------
+# Build toolchain
+# -------------------------------
+echo "Building toolchain..."
+cd "$CVA6_DIR/util/toolchain-builder"
+bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
 
-echo -e "Applying gcc-cva6-tune.patch to add support for the -mtune=cva6 option in GCC.\n"
+# -------------------------------
+# Python virtual environment (cva6)
+# -------------------------------
+echo "Setting up Python virtual environment for CVA6 verification..."
 
-#echo -e "cd $INSTALL_DIR/util/toolchain-builder/src/gcc && git apply ../../gcc-cva6-tune.patch\n" 
+VENV_DIR="$CVA6_DIR/venv-cva6"
 
-cd $INSTALL_DIR/util/toolchain-builder/src/gcc && git apply ../../gcc-cva6-tune.patch
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR"
+fi
 
-echo -e "Building a bare metal toolchain\n"
+# Activate venv temporarily to install deps
+source "$VENV_DIR/bin/activate"
 
-bash build-toolchain.sh $CONFIG_NAME $INSTALL_DIR
+python -m pip install --upgrade pip
+python -m pip install -r "$CVA6_DIR/verif/sim/dv/requirements.txt"
+
+deactivate
+
+# -------------------------------
+# Write venv activation helper to .bashrc
+# -------------------------------
+BASHRC="$HOME/.bashrc"
+
+if ! grep -q "activate_cva6()" "$BASHRC"; then
+    {
+        echo ""
+        echo "# CVA6 Python virtual environment"
+        echo "activate_cva6() {"
+        echo "    source \"$VENV_DIR/bin/activate\""
+        echo "}"
+    } >> "$BASHRC"
+fi
+
+# -------------------------------
+# CVA6 smoke tests (Spike + Verilator)
+# -------------------------------
+read -p "Run CVA6 smoke tests now? (y/n): " run_tests
+
+if [[ "$run_tests" =~ ^[Yy]$ ]]; then
+    echo "Running CVA6 smoke tests (Spike + Verilator)..."
+    cd "$CVA6_DIR"
+    source "$VENV_DIR/bin/activate"
+    export DV_SIMULATORS=veri-testharness,spike
+    bash verif/regress/smoke-tests.sh
+    deactivate
+else
+    echo "Skipping smoke tests."
+fi
+
+# -------------------------------
+# Final message
+# -------------------------------
+echo
+echo "=== DONE ==="
+echo "To activate the CVA6 Python environment later, run:"
+echo "  activate_cva6"
