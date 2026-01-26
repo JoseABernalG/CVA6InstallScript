@@ -1,7 +1,29 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "=== CVA6 Toolchain Installer ==="
+
+# -------------------------------
+# Helper functions
+# -------------------------------
+error_exit() {
+    echo "ERROR: $1"
+    exit 1
+}
+
+is_integer() {
+    [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+# -------------------------------
+# Check gcc exists
+# -------------------------------
+if ! command -v gcc &> /dev/null; then
+    error_exit "gcc not found. Install GCC first."
+fi
+
+GCC_VER=$(gcc -dumpversion)
+DEFAULT_CONFIG="gcc-${GCC_VER}-BareMetal"
 
 # -------------------------------
 # Threads
@@ -14,10 +36,10 @@ case "$opti" in
         ;;
     n|N)
         read -p "Enter number of threads: " NUM_JOBS
+        is_integer "$NUM_JOBS" || error_exit "NUM_JOBS must be a number."
         ;;
     *)
-        echo "Not valid answer."
-        exit 1
+        error_exit "Not valid answer."
         ;;
 esac
 
@@ -35,25 +57,26 @@ sudo apt-get install -y \
     libmpc-dev libmpfr-dev libgmp-dev gawk \
     build-essential bison flex texinfo gperf \
     libtool bc zlib1g-dev help2man device-tree-compiler \
-    python3 python3-pip python3-venv
+    python3 python3-pip python3-venv cmake
+
+# Optional but recommended: remove asciidoctor warning about pygments
+sudo apt-get install -y ruby ruby-dev
+sudo gem install pygments.rb
 
 # -------------------------------
 # CVA6 directory
 # -------------------------------
-echo
 read -p "Path to CVA6 repository (e.g. ~/cva6): " CVA6_DIR
 CVA6_DIR="${CVA6_DIR/#\~/$HOME}"
 
-[ -d "$CVA6_DIR/util/toolchain-builder" ] || {
-    echo "Invalid CVA6 directory"
-    exit 1
-}
+[ -d "$CVA6_DIR" ] || error_exit "CVA6 directory not found."
 
-export CVA6_DIR
-
-echo "Initializing CVA6 submodules..."
 cd "$CVA6_DIR"
 git submodule update --init --recursive
+
+[ -d "$CVA6_DIR/util/toolchain-builder" ] || error_exit "Invalid CVA6 directory (toolchain-builder missing)."
+
+export CVA6_DIR
 
 # -------------------------------
 # RISCV install directory
@@ -70,18 +93,17 @@ mkdir -p "$INSTALL_DIR"
 # -------------------------------
 # Config name
 # -------------------------------
-read -p "Custom config name? (y/n) [default: gcc-13.3.0-BareMetal]: " opti
+read -p "Custom config name? (y/n) [default: $DEFAULT_CONFIG]: " opti
 
 case "$opti" in
     y|Y)
         read -p "Enter custom config name: " CONFIG_NAME
         ;;
     n|N|"")
-        CONFIG_NAME="gcc-13.3.0-BareMetal"
+        CONFIG_NAME="$DEFAULT_CONFIG"
         ;;
     *)
-        echo "Not valid answer."
-        exit 1
+        error_exit "Not valid answer."
         ;;
 esac
 
@@ -95,16 +117,11 @@ echo "Fetching toolchain sources..."
 bash "$CVA6_DIR/util/toolchain-builder/get-toolchain.sh"
 
 # -------------------------------
-# Apply patch (idempotent)
+# Apply patch
 # -------------------------------
 echo "Applying CVA6 GCC patch..."
 cd "$CVA6_DIR/util/toolchain-builder/src/gcc"
-
-if git apply --check ../../gcc-cva6-tune.patch 2>/dev/null; then
-    git apply ../../gcc-cva6-tune.patch
-else
-    echo "Patch already applied or not applicable, skipping."
-fi
+git apply ../../gcc-cva6-tune.patch
 
 # -------------------------------
 # Build toolchain
@@ -114,37 +131,64 @@ cd "$CVA6_DIR/util/toolchain-builder"
 bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
 
 # -------------------------------
-# Python virtual environment (cva6)
+# Virtual environment setup
 # -------------------------------
 echo "Setting up Python virtual environment for CVA6 verification..."
 
-VENV_DIR="$CVA6_DIR/venv-cva6"
+VENV_DIR="$CVA6_DIR/cva6"
 
 if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
 fi
 
-# Activate venv temporarily to install deps
 source "$VENV_DIR/bin/activate"
+pip install --upgrade pip
 
-python -m pip install --upgrade pip
-python -m pip install -r "$CVA6_DIR/verif/sim/dv/requirements.txt"
+# -------------------------------
+# Find requirements file
+# -------------------------------
+REQ_FILE=$(find "$CVA6_DIR/verif" -name "requirements.txt" | head -n 1 || true)
+
+if [ -z "$REQ_FILE" ]; then
+    error_exit "No requirements.txt found in CVA6 repository."
+fi
+
+echo "Using requirements file: $REQ_FILE"
+pip install -r "$REQ_FILE"
+
+# -------------------------------
+# Docs requirements
+# -------------------------------
+if [ -f "$CVA6_DIR/docs/requirements.txt" ]; then
+    pip install -r "$CVA6_DIR/docs/requirements.txt"
+else
+    error_exit "No docs/requirements.txt found in CVA6 repository."
+fi
+
+# Install rstcloth explicitly
+pip install rstcloth
+
+# -------------------------------
+# Generate documentation (always)
+# -------------------------------
+echo "Generating project documentation..."
+cd "$CVA6_DIR/docs"
+make
+cd "$CVA6_DIR"
 
 deactivate
 
 # -------------------------------
-# Write venv activation helper to .bashrc
+# Writing virtual env to .bashrc file
 # -------------------------------
 BASHRC="$HOME/.bashrc"
 
-if ! grep -q "activate_cva6()" "$BASHRC"; then
-    {
-        echo ""
-        echo "# CVA6 Python virtual environment"
-        echo "activate_cva6() {"
-        echo "    source \"$VENV_DIR/bin/activate\""
-        echo "}"
-    } >> "$BASHRC"
+if ! grep -q "function cva6" "$BASHRC"; then
+    echo "" >> "$BASHRC"
+    echo "# CVA6 Python virtual environment" >> "$BASHRC"
+    echo "function cva6() {" >> "$BASHRC"
+    echo "    source \"$VENV_DIR/bin/activate\"" >> "$BASHRC"
+    echo "}" >> "$BASHRC"
 fi
 
 # -------------------------------
@@ -153,20 +197,42 @@ fi
 read -p "Run CVA6 smoke tests now? (y/n): " run_tests
 
 if [[ "$run_tests" =~ ^[Yy]$ ]]; then
-    echo "Running CVA6 smoke tests (Spike + Verilator)..."
-    cd "$CVA6_DIR"
+
+    SMOKE_SCRIPT="$CVA6_DIR/verif/regress/smoke-gen_tests.sh"
+
+    if [ ! -f "$SMOKE_SCRIPT" ]; then
+        error_exit "No smoke-gen_tests.sh found in $CVA6_DIR/verif/regress"
+    fi
+
+    echo "Running CVA6 smoke tests using: $SMOKE_SCRIPT"
+
     source "$VENV_DIR/bin/activate"
     export DV_SIMULATORS=veri-testharness,spike
-    bash verif/regress/smoke-tests.sh
+
+    bash "$SMOKE_SCRIPT"
+
     deactivate
 else
     echo "Skipping smoke tests."
 fi
 
 # -------------------------------
-# Final message
+# Final user instructions
 # -------------------------------
-echo
-echo "=== DONE ==="
-echo "To activate the CVA6 Python environment later, run:"
-echo "  activate_cva6"
+echo ""
+echo "=== INSTALLATION COMPLETE ==="
+echo ""
+echo "To activate the CVA6 Python virtual environment, run:"
+echo "  cva6"
+echo ""
+echo "To deactivate, run:"
+echo "  deactivate"
+echo ""
+echo "To regenerate documentation later:"
+echo "  cva6"
+echo "  cd $CVA6_DIR/docs"
+echo "  make"
+echo "  deactivate"
+echo ""
+echo "Happy RISC-Ving!"
+echo "============================="
