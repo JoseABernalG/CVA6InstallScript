@@ -1,198 +1,227 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -------------------------
+# ============================================================
 # Helpers
-# -------------------------
+# ============================================================
 expand_path() {
-  local path="$1"
-  if [[ "$path" == "~"* ]]; then
-    echo "${path/#\~/$HOME}"
-  else
-    echo "$path"
-  fi
+  [[ "$1" == "~"* ]] && echo "${1/#\~/$HOME}" || echo "$1"
+}
+
+ask_yes_no() {
+  local prompt="$1"
+  read -p "$prompt (y/n): " ans
+  [[ "$ans" =~ ^[Yy]$ ]]
 }
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# -------------------------
-# Ask for locations
-# -------------------------
+require_packages() {
+  local missing=()
+  for pkg in "$@"; do
+    dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+  done
+
+  if (( ${#missing[@]} > 0 )); then
+    echo ""
+    echo "Installing missing system packages:"
+    echo "  ${missing[*]}"
+    sudo apt update
+    sudo apt install -y "${missing[@]}"
+  else
+    echo "✓ All required system packages are already installed"
+  fi
+}
+
+# ============================================================
+# Paths
+# ============================================================
 read -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
 read -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
 
-CVA6_REPO=$(expand_path "$CVA6_REPO")
-RISCV=$(expand_path "$RISCV")
+CVA6_REPO=$(realpath "$(expand_path "$CVA6_REPO")")
+RISCV=$(realpath "$(expand_path "$RISCV")")
 
-CVA6_REPO=$(realpath "$CVA6_REPO")
-RISCV=$(realpath "$RISCV")
-
-if [[ ! -d "$CVA6_REPO" ]]; then
-  echo "ERROR: CVA6 repo not found at $CVA6_REPO"
-  exit 1
-fi
-
+[[ ! -d "$CVA6_REPO" ]] && echo "ERROR: CVA6 repo not found" && exit 1
 mkdir -p "$RISCV"
 
-export RISCV
-export INSTALL_DIR="$RISCV"
+export RISCV INSTALL_DIR="$RISCV"
 
-# -------------------------
-# Load pyenv for script
-# -------------------------
-export PATH="$HOME/.cva/bin/:$PATH"
-export PATH="$HOME/.cva/shims:$PATH"
-eval "$(pyenv init -)"
-eval "$(pyenv virtualenv-init -)"
-
-# -------------------------
-# Create/activate virtualenv cva6
-# -------------------------
-if pyenv versions --bare | grep -q "^cva6\$"; then
-  echo "Virtualenv 'cva6' already exists. Activating..."
-else
-  echo "Creating pyenv virtualenv 'cva6'..."
-  pyenv install -s 3.12.2
-  pyenv virtualenv 3.12.2 cva6
-fi
-
-pyenv activate cva6
-
-# -------------------------
-# Add pyenv init to .bashrc if missing
-# -------------------------
-BASHRC="$HOME/.bashrc"
-if ! grep -q "pyenv virtualenv-init" "$BASHRC"; then
-  cat >> "$BASHRC" << 'EOF'
-
-# ---- CVA6 environment setup ----
-export PATH="$HOME/.cva/bin/:$PATH"
-export PATH="$HOME/.cva/shims:$PATH"
-eval "$(pyenv init -)"
-eval "$(pyenv virtualenv-init -)"
-EOF
-fi
-
-# -------------------------
+# ============================================================
 # Threads
-# -------------------------
+# ============================================================
+echo ""
 read -p "Use all available threads? (y/n): " opti
 case "$opti" in
-    y|Y) NUM_JOBS=$(nproc) ;;
-    n|N) read -p "Enter number of threads: " NUM_JOBS ;;
-    *) echo "Not valid answer."; exit 1 ;;
+  y|Y) NUM_JOBS=$(nproc) ;;
+  n|N)
+    read -p "Enter number of threads: " NUM_JOBS
+    ;;
+  *)
+    echo "Invalid option"
+    exit 1
+    ;;
 esac
+
 export NUM_JOBS
-echo "Using $NUM_JOBS threads"
+echo "Using $NUM_JOBS build threads"
 
-# -------------------------
-# Install prerequisites
-# -------------------------
-sudo apt-get update
-sudo apt-get install -y \
-    autoconf automake autotools-dev curl git \
-    libmpc-dev libmpfr-dev libgmp-dev gawk \
-    build-essential bison flex texinfo gperf \
-    libtool bc zlib1g-dev help2man device-tree-compiler \
-    python3 python3-pip python3-venv \
-    ruby ruby-dev build-essential
+# ============================================================
+# System dependencies (verified)
+# ============================================================
+echo ""
+echo "Checking system dependencies..."
 
-# -------------------------
-# Config name (based on installed GCC)
-# -------------------------
-GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "13.3.0")
-CONFIG_NAME="gcc-${GCC_VER}-BareMetal"
+require_packages \
+  autoconf automake autotools-dev curl git gawk \
+  build-essential bison flex texinfo gperf \
+  libmpc-dev libmpfr-dev libgmp-dev libtool bc \
+  zlib1g-dev help2man device-tree-compiler \
+  python3 python3-pip python3-venv \
+  ruby ruby-dev cmake pkg-config \
+  texlive-latex-base texlive-latex-extra texlive-fonts-recommended
 
-read -p "Custom config name? (y/n) [default: $CONFIG_NAME]: " opti
+# ============================================================
+# GCC config name
+# ============================================================
+GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "unknown")
+DEFAULT_CONFIG_NAME="gcc-${GCC_VER}-BareMetal"
+
+echo ""
+echo "Detected GCC-based config name:"
+echo "  $DEFAULT_CONFIG_NAME"
+read -p "Use this config name? (y/n) [default]: " opti
+
 case "$opti" in
-    y|Y)
-        read -p "Enter custom config name: " CONFIG_NAME
-        ;;
-    n|N|"")
-        ;;
-    *)
-        echo "Not valid answer."
-        exit 1
-        ;;
+  y|Y|"")
+    CONFIG_NAME="$DEFAULT_CONFIG_NAME"
+    ;;
+  n|N)
+    read -p "Enter custom config name: " CONFIG_NAME
+    ;;
+  *)
+    echo "Invalid option"
+    exit 1
+    ;;
 esac
 
 export CONFIG_NAME
-echo "Using config: $CONFIG_NAME"
+echo "Using config name: $CONFIG_NAME"
 
-# -------------------------
-# Git submodule update
-# -------------------------
+# ============================================================
+# Python virtual environment
+# ============================================================
+USE_PYTHON=false
+if ask_yes_no "Use Python virtual environment (ScammaCVA6)?"; then
+  USE_PYTHON=true
+  cd "$HOME"
+  if [[ ! -d ScammaCVA6 ]]; then
+    echo "Creating Python venv: ScammaCVA6"
+    python3 -m venv ScammaCVA6
+  fi
+  source ScammaCVA6/bin/activate
+  pip install --upgrade pip
+fi
+
+# ============================================================
+# Git + toolchain
+# ============================================================
 cd "$CVA6_REPO"
 git submodule update --init --recursive
 
-# -------------------------
-# Fetch toolchain
-# -------------------------
 echo "Fetching toolchain sources..."
-bash "$CVA6_REPO/util/toolchain-builder/get-toolchain.sh"
+bash util/toolchain-builder/get-toolchain.sh
 
-# -------------------------
-# Apply patch
-# -------------------------
 echo "Applying CVA6 GCC patch..."
-cd "$CVA6_REPO/util/toolchain-builder/src/gcc"
-git apply ../../gcc-cva6-tune.patch
+cd util/toolchain-builder/src/gcc
+git apply ../../gcc-cva6-tune.patch || true
 
-# -------------------------
-# Build toolchain
-# -------------------------
 echo "Building toolchain..."
 cd "$CVA6_REPO/util/toolchain-builder"
 bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
 
-# -------------------------
-# Install Python requirements
-# -------------------------
-pip3 install -r "$CVA6_REPO/verif/sim/dv/requirements.txt"
-
-# -------------------------
-# Install Ruby gems for docs (with sudo)
-# -------------------------
-echo "Installing Ruby gems (requires sudo)..."
-sudo gem install asciidoctor asciidoctor-bibtex asciidoctor-diagram asciidoctor-lists asciidoctor-mathematical pygments.rb
-
-# -------------------------
-# Run smoke tests
-# -------------------------
-read -p "Run CVA6 smoke tests now? (y/n): " opti
-if [[ "$opti" == "y" || "$opti" == "Y" ]]; then
-    export DV_SIMULATORS=veri-testharness,spike
-    bash "$CVA6_REPO/verif/regress/smoke-tests-cv32a65x.sh"
+# ============================================================
+# Python requirements
+# ============================================================
+if $USE_PYTHON; then
+  echo "Installing Python requirements..."
+  pip install -r "$CVA6_REPO/verif/sim/dv/requirements.txt"
 fi
 
-# -------------------------
-# Documentation option
-# -------------------------
-read -p "Build documentation now? (y/n): " opti
-if [[ "$opti" == "y" || "$opti" == "Y" ]]; then
-    cd "$CVA6_REPO/docs"
-    make
-else
-    echo ""
-    echo "To build docs later:"
-    echo "  pyenv activate cva6"
-    echo "  cd $CVA6_REPO/docs"
-    echo "  make"
+# ============================================================
+# Ruby gems (docs)
+# ============================================================
+if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
+  deactivate 2>/dev/null || true
+
+  echo "Installing Ruby gems for documentation..."
+  sudo gem install \
+    asciidoctor \
+    asciidoctor-bibtex \
+    asciidoctor-diagram \
+    asciidoctor-lists \
+    asciidoctor-mathematical \
+    pygments.rb
 fi
 
-# -------------------------
+# ============================================================
+# Smoke tests
+# ============================================================
+if ask_yes_no "Run smoke tests now?"; then
+  echo "Running smoke tests from CVA6 repo root..."
+  cd "$CVA6_REPO"
+
+  $USE_PYTHON && source "$HOME/ScammaCVA6/bin/activate"
+
+  export DV_SIMULATORS=veri-testharness,spike
+  bash verif/regress/smoke-gen_tests.sh
+fi
+
+
+# ============================================================
+# Docs build
+# ============================================================
+if ask_yes_no "Build documentation now?"; then
+  cd "$CVA6_REPO/docs"
+  make
+fi
+
+# ============================================================
+# Persist RISCV + PATH
+# ============================================================
+if ask_yes_no "Add RISCV and toolchain to ~/.bashrc?"; then
+  if ! grep -q "RISC-V Toolchain (CVA6)" "$HOME/.bashrc"; then
+    cat >> "$HOME/.bashrc" << EOF
+
+# ---- RISC-V Toolchain (CVA6) ----
+export RISCV="$RISCV"
+case ":\$PATH:" in
+  *":\$RISCV/bin:"*) ;;
+  *) export PATH="\$RISCV/bin:\$PATH" ;;
+esac
+EOF
+    echo "✓ RISC-V environment added to ~/.bashrc"
+  else
+    echo "✓ RISC-V environment already present in ~/.bashrc"
+  fi
+fi
+
+# ============================================================
 # Final message
-# -------------------------
-echo "======================================"
-echo "Installation complete."
+# ============================================================
 echo ""
-echo "Activate env:"
-echo "  pyenv activate cva6"
-echo "Deactivate env:"
-echo "  pyenv deactivate"
 echo "======================================"
+echo "CVA6 installation completed successfully"
+echo ""
+echo "Toolchain config : $CONFIG_NAME"
+echo "RISCV path       : $RISCV"
+echo ""
+echo "Activate Python venv:"
+echo "  source ~/ScammaCVA6/bin/activate"
+echo "======================================"
+
 
 
 
