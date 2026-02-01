@@ -81,7 +81,25 @@ require_packages \
   zlib1g-dev help2man device-tree-compiler \
   python3 python3-pip python3-venv \
   ruby ruby-dev cmake pkg-config \
-  texlive-latex-base texlive-latex-extra texlive-fonts-recommended
+  texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
+  pkg-config libxml2-dev libxslt1-dev zlib1g-dev libglib2.0-dev \
+  libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libpixman-1-dev \
+  nodejs npm
+
+# ------------------------------------------------------------
+# Install documentation image generators (Node.js tools)
+# ------------------------------------------------------------
+if ! command -v bytefield-svg >/dev/null 2>&1; then
+  echo "Installing bytefield-svg..."
+  sudo npm install -g bytefield-svg
+fi
+
+if ! command -v wavedrom-cli >/dev/null 2>&1; then
+  echo "Installing wavedrom-cli..."
+  sudo npm install -g wavedrom-cli
+fi
+
+
 
 # ============================================================
 # GCC config name
