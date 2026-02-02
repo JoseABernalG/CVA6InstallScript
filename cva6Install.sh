@@ -49,6 +49,31 @@ mkdir -p "$RISCV"
 
 export RISCV INSTALL_DIR="$RISCV"
 
+
+# ============================================================
+# Fix documentation bug (missing endif in machine.adoc)
+# Must run before toolchain/doc build
+# ============================================================
+
+MACHINE_ADOC="$CVA6_REPO/docs/riscv-isa/src/machine.adoc"
+
+echo "Checking machine.adoc preprocessor directives..."
+
+if [[ -f "$MACHINE_ADOC" ]]; then
+    LINE_CONTENT=$(sed -n '114p' "$MACHINE_ADOC")
+
+    if [[ "$LINE_CONTENT" != *"endif::[]"* ]]; then
+        echo "Fixing missing endif::[] in machine.adoc (line 114)..."
+        sed -i '114a endif::[]' "$MACHINE_ADOC"
+        echo "Patch applied."
+    else
+        echo "machine.adoc already correct."
+    fi
+else
+    echo "WARNING: machine.adoc not found, skipping fix."
+fi
+
+
 # ============================================================
 # Threads
 # ============================================================
@@ -141,6 +166,10 @@ if ask_yes_no "Use Python virtual environment (ScammaCVA6)?"; then
   fi
   source ScammaCVA6/bin/activate
   pip install --upgrade pip
+  pip install rstcloth
+  pip install mako
+  pip install mdutils
+
 fi
 
 # ============================================================
@@ -166,6 +195,7 @@ bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
 if $USE_PYTHON; then
   echo "Installing Python requirements..."
   pip install -r "$CVA6_REPO/verif/sim/dv/requirements.txt"
+  pip install -r "$CVA6_REPO/docs/requirements.txt"
 fi
 
 # ============================================================
@@ -184,16 +214,80 @@ if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
     pygments.rb
 fi
 
+# =========================
+# Environment setup
+# =========================
+
+# Use Verilator as simulator instead of VCS
+export DV_SIMULATORS=verilator
+
+# Optional: set verbosity (can be overridden later)
+export UVM_VERBOSITY=UVM_NONE
+
+# =========================
+# Tool installation & smoke tests
+# =========================
+
+# -----------------------------
+# Ensure LD_LIBRARY_PATH exists to avoid unbound variable errors
+# -----------------------------
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
+# -----------------------------
+# Add Verilator include path so vpi_user.h and svdpi.h are found
+# -----------------------------
+VERILATOR_INCLUDE="$CVA6_REPO/tools/verilator-v5.008/share/verilator/include"
+export C_INCLUDE_PATH="$VERILATOR_INCLUDE${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
+export CPLUS_INCLUDE_PATH="$VERILATOR_INCLUDE${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+
+
+# Install/verifies Verilator
+cd "$CVA6_REPO"
+
+bash verif/regress/install-verilator.sh
+
+# Install/verifies Spike
+bash verif/regress/install-spike.sh
+
+# Setup simulation environment
+source verif/sim/setup-env.sh
+
+# =========================
+# Run smoke tests using Verilator
+# =========================
+
+read -p "Run smoke tests now? (y/n): " run_smoke
+if [[ "$run_smoke" =~ ^[Yy]$ ]]; then
+    echo "Running smoke tests with Verilator..."
+    bash verif/regress/smoke-gen_tests.sh
+else
+    echo "Skipping smoke tests."
+fi
+
+
 # ============================================================
 # Smoke tests
 # ============================================================
 if ask_yes_no "Run smoke tests now?"; then
-  echo "Running smoke tests from CVA6 repo root..."
-  cd "$CVA6_REPO"
-
   $USE_PYTHON && source "$HOME/ScammaCVA6/bin/activate"
 
+  echo "Forcing Verilator smoke tests..."
   export DV_SIMULATORS=veri-testharness,spike
+  export DV_SIMULATOR=veri-testharness
+
+  cd "$CVA6_REPO"
+fi
+# -----------------------------
+# Ensure LD_LIBRARY_PATH is always defined (avoids "unbound variable" errors)
+# and add Verilator include path so vpi_user.h is found
+# -----------------------------
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
+# Add Verilator include path to C_INCLUDE_PATH and CPLUS_INCLUDE_PATH
+if [ -n "$VERILATOR_INSTALL_DIR" ]; then
+    export C_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
+    export CPLUS_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+
   bash verif/regress/smoke-gen_tests.sh
 fi
 
@@ -240,8 +334,14 @@ echo "Activate Python venv:"
 echo "  source ~/ScammaCVA6/bin/activate"
 echo "======================================"
 
-
-
+echo ""
+echo "---------------------------------------------------"
+echo "Reminder: If you want to manually set environment for future sessions:"
+echo "  export LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\""
+echo "  export C_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$C_INCLUDE_PATH\""
+echo "  export CPLUS_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$CPLUS_INCLUDE_PATH\""
+echo "You can add these lines to your ~/.bashrc or ~/.zshrc"
+echo "---------------------------------------------------"
 
 
 # Example commands to build docs:
