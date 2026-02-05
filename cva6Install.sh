@@ -49,31 +49,6 @@ mkdir -p "$RISCV"
 
 export RISCV INSTALL_DIR="$RISCV"
 
-
-# ============================================================
-# Fix documentation bug (missing endif in machine.adoc)
-# Must run before toolchain/doc build
-# ============================================================
-
-MACHINE_ADOC="$CVA6_REPO/docs/riscv-isa/src/machine.adoc"
-
-echo "Checking machine.adoc preprocessor directives..."
-
-if [[ -f "$MACHINE_ADOC" ]]; then
-    LINE_CONTENT=$(sed -n '114p' "$MACHINE_ADOC")
-
-    if [[ "$LINE_CONTENT" != *"endif::[]"* ]]; then
-        echo "Fixing missing endif::[] in machine.adoc (line 114)..."
-        sed -i '114a endif::[]' "$MACHINE_ADOC"
-        echo "Patch applied."
-    else
-        echo "machine.adoc already correct."
-    fi
-else
-    echo "WARNING: machine.adoc not found, skipping fix."
-fi
-
-
 # ============================================================
 # Threads
 # ============================================================
@@ -85,8 +60,8 @@ case "$opti" in
     read -p "Enter number of threads: " NUM_JOBS
     ;;
   *)
-    echo "Invalid option"
-    exit 1
+    echo "Invalid option, using default (1)"
+    NUM_JOBS=1
     ;;
 esac
 
@@ -117,14 +92,16 @@ require_packages \
 if ! command -v bytefield-svg >/dev/null 2>&1; then
   echo "Installing bytefield-svg..."
   sudo npm install -g bytefield-svg
+else
+  echo "✓ bytefield-svg is already installed"
 fi
 
 if ! command -v wavedrom-cli >/dev/null 2>&1; then
   echo "Installing wavedrom-cli..."
   sudo npm install -g wavedrom-cli
+else
+  echo "✓ wavedrom-cli is already installed"
 fi
-
-
 
 # ============================================================
 # GCC config name
@@ -145,8 +122,8 @@ case "$opti" in
     read -p "Enter custom config name: " CONFIG_NAME
     ;;
   *)
-    echo "Invalid option"
-    exit 1
+    echo "Invalid option, using default config name"
+    CONFIG_NAME="$DEFAULT_CONFIG_NAME"
     ;;
 esac
 
@@ -166,16 +143,15 @@ if ask_yes_no "Use Python virtual environment (ScammaCVA6)?"; then
   fi
   source ScammaCVA6/bin/activate
   pip install --upgrade pip
-  pip install rstcloth
-  pip install mako
-  pip install mdutils
-
+  pip install rstcloth mako mdutils recommonmark
+  echo "✓ Python virtual environment ready"
 fi
 
 # ============================================================
 # Git + toolchain
 # ============================================================
 cd "$CVA6_REPO"
+echo "Initializing git submodules..."
 git submodule update --init --recursive
 
 echo "Fetching toolchain sources..."
@@ -183,7 +159,7 @@ bash util/toolchain-builder/get-toolchain.sh
 
 echo "Applying CVA6 GCC patch..."
 cd util/toolchain-builder/src/gcc
-git apply ../../gcc-cva6-tune.patch || true
+git apply ../../gcc-cva6-tune.patch || echo "Patch already applied or not found"
 
 echo "Building toolchain..."
 cd "$CVA6_REPO/util/toolchain-builder"
@@ -203,7 +179,6 @@ fi
 # ============================================================
 if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
   deactivate 2>/dev/null || true
-
   echo "Installing Ruby gems for documentation..."
   sudo gem install \
     asciidoctor \
@@ -212,85 +187,48 @@ if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
     asciidoctor-lists \
     asciidoctor-mathematical \
     pygments.rb
+  echo "✓ Ruby gems installed"
 fi
 
-# =========================
-# Environment setup
-# =========================
+# ============================================================
+# Fix documentation bug (missing endif in machine.adoc)
+# Must run before toolchain/doc build
+# ============================================================
+MACHINE_ADOC="$CVA6_REPO/docs/riscv-isa/src/machine.adoc"
 
-# Use Verilator as simulator instead of VCS
-export DV_SIMULATORS=verilator
+echo "Checking machine.adoc preprocessor directives..."
 
-# Optional: set verbosity (can be overridden later)
-export UVM_VERBOSITY=UVM_NONE
+if [[ -f "$MACHINE_ADOC" ]]; then
+    LINE_CONTENT=$(sed -n '3114p' "$MACHINE_ADOC")
 
-# =========================
-# Tool installation & smoke tests
-# =========================
-
-# -----------------------------
-# Ensure LD_LIBRARY_PATH exists to avoid unbound variable errors
-# -----------------------------
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-
-# -----------------------------
-# Add Verilator include path so vpi_user.h and svdpi.h are found
-# -----------------------------
-VERILATOR_INCLUDE="$CVA6_REPO/tools/verilator-v5.008/share/verilator/include"
-export C_INCLUDE_PATH="$VERILATOR_INCLUDE${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-export CPLUS_INCLUDE_PATH="$VERILATOR_INCLUDE${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-
-
-# Install/verifies Verilator
-cd "$CVA6_REPO"
-
-bash verif/regress/install-verilator.sh
-
-# Install/verifies Spike
-bash verif/regress/install-spike.sh
-
-# Setup simulation environment
-source verif/sim/setup-env.sh
-
-# =========================
-# Run smoke tests using Verilator
-# =========================
-
-read -p "Run smoke tests now? (y/n): " run_smoke
-if [[ "$run_smoke" =~ ^[Yy]$ ]]; then
-    echo "Running smoke tests with Verilator..."
-    bash verif/regress/smoke-gen_tests.sh
+    if [[ "$LINE_CONTENT" != *"endif::[]"* ]]; then
+        echo "Fixing missing endif::[] in machine.adoc (line 3114)..."
+        sed -i '3114a endif::[]' "$MACHINE_ADOC"
+        echo "Patch applied."
+    else
+        echo "machine.adoc already correct."
+    fi
 else
-    echo "Skipping smoke tests."
+    echo "WARNING: machine.adoc not found, skipping fix."
 fi
-
 
 # ============================================================
-# Smoke tests
+# Copy missing cv64a6_mmu_config_pkg.sv
 # ============================================================
-if ask_yes_no "Run smoke tests now?"; then
-  $USE_PYTHON && source "$HOME/ScammaCVA6/bin/activate"
+SRC_FILE="$CVA6_REPO/core/include/deprecated_packages/cv64a6_mmu_config_pkg.sv"
+DEST_FILE="$CVA6_REPO/core/include/cv64a6_mmu_config_pkg.sv"
 
-  echo "Forcing Verilator smoke tests..."
-  export DV_SIMULATORS=veri-testharness,spike
-  export DV_SIMULATOR=veri-testharness
-
-  cd "$CVA6_REPO"
+if [[ -f "$DEST_FILE" ]]; then
+    echo "cv64a6_mmu_config_pkg.sv already exists, skipping copy."
+else
+    if [[ -f "$SRC_FILE" ]]; then
+        echo "Copying cv64a6_mmu_config_pkg.sv..."
+        cp "$SRC_FILE" "$DEST_FILE"
+        echo "Done."
+    else
+        echo "WARNING: Source file not found: $SRC_FILE"
+    fi
 fi
-# -----------------------------
-# Ensure LD_LIBRARY_PATH is always defined (avoids "unbound variable" errors)
-# and add Verilator include path so vpi_user.h is found
-# -----------------------------
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-
-# Add Verilator include path to C_INCLUDE_PATH and CPLUS_INCLUDE_PATH
-if [ -n "$VERILATOR_INSTALL_DIR" ]; then
-    export C_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-    export CPLUS_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-
-  bash verif/regress/smoke-gen_tests.sh
-fi
-
 
 # ============================================================
 # Docs build
@@ -298,10 +236,25 @@ fi
 if ask_yes_no "Build documentation now?"; then
   cd "$CVA6_REPO/docs"
   make
+  echo "✓ Documentation built successfully"
 fi
 
 # ============================================================
-# Persist RISCV + PATH
+# Smoke tests
+# ============================================================
+if ask_yes_no "Run smoke tests now?"; then
+  $USE_PYTHON && source "$HOME/ScammaCVA6/bin/activate"
+
+  echo "Running smoke tests..."
+  cd "$CVA6_REPO"
+  bash verif/regress/smoke-gen_tests.sh
+  echo "✓ Smoke tests completed"
+else
+  echo "Skipping smoke tests."
+fi
+
+# ============================================================
+# Environment persistence
 # ============================================================
 if ask_yes_no "Add RISCV and toolchain to ~/.bashrc?"; then
   if ! grep -q "RISC-V Toolchain (CVA6)" "$HOME/.bashrc"; then
@@ -330,18 +283,31 @@ echo ""
 echo "Toolchain config : $CONFIG_NAME"
 echo "RISCV path       : $RISCV"
 echo ""
-echo "Activate Python venv:"
+echo "To activate Python venv:"
 echo "  source ~/ScammaCVA6/bin/activate"
-echo "======================================"
-
 echo ""
-echo "---------------------------------------------------"
-echo "Reminder: If you want to manually set environment for future sessions:"
+echo "To set environment for future sessions:"
 echo "  export LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\""
 echo "  export C_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$C_INCLUDE_PATH\""
 echo "  export CPLUS_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$CPLUS_INCLUDE_PATH\""
-echo "You can add these lines to your ~/.bashrc or ~/.zshrc"
-echo "---------------------------------------------------"
+echo "======================================"
+
+
+
+
+# Example commands to build docs:
+
+
+
+#exit 0
+#make -C 04_cv32a65x/design design-html
+
+#rm -Rf cva6 RISCV && mkdir RISCV
+#git clone https://github.com/openhwgroup/cva6.git
+#./CVA6InstallScript/cva6Install.sh
+
+
+
 
 
 # Example commands to build docs:
