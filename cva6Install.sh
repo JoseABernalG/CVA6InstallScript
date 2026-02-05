@@ -104,6 +104,21 @@ else
 fi
 
 # ============================================================
+# Ruby gems (docs)
+# ============================================================
+if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
+  echo "Installing Ruby gems for documentation..."
+  sudo gem install \
+    asciidoctor \
+    asciidoctor-bibtex \
+    asciidoctor-diagram \
+    asciidoctor-lists \
+    asciidoctor-mathematical \
+    pygments.rb
+  echo "✓ Ruby gems installed"
+fi
+
+# ============================================================
 # GCC config name
 # ============================================================
 GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "unknown")
@@ -174,21 +189,6 @@ if $USE_PYTHON; then
   pip install -r "$CVA6_REPO/docs/requirements.txt"
 fi
 
-# ============================================================
-# Ruby gems (docs)
-# ============================================================
-if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
-  deactivate 2>/dev/null || true
-  echo "Installing Ruby gems for documentation..."
-  sudo gem install \
-    asciidoctor \
-    asciidoctor-bibtex \
-    asciidoctor-diagram \
-    asciidoctor-lists \
-    asciidoctor-mathematical \
-    pygments.rb
-  echo "✓ Ruby gems installed"
-fi
 
 # ============================================================
 # Fix documentation bug (missing endif in machine.adoc)
@@ -243,7 +243,7 @@ fi
 # Smoke tests
 # ============================================================
 if ask_yes_no "Run smoke tests now?"; then
-  $USE_PYTHON && source "$HOME/ScammaCVA6/bin/activate"
+  $USE_PYTHON
 
   echo "Running smoke tests..."
   cd "$CVA6_REPO"
@@ -273,6 +273,8 @@ EOF
   fi
 fi
 
+deactivate
+
 # ============================================================
 # Final message
 # ============================================================
@@ -288,8 +290,8 @@ echo "  source ~/ScammaCVA6/bin/activate"
 echo ""
 echo "To set environment for future sessions:"
 echo "  export LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\""
-echo "  export C_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$C_INCLUDE_PATH\""
-echo "  export CPLUS_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$CPLUS_INCLUDE_PATH\""
+#echo "  export C_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$C_INCLUDE_PATH\""
+#echo "  export CPLUS_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$CPLUS_INCLUDE_PATH\""
 echo "======================================"
 
 
