@@ -239,6 +239,23 @@ if ask_yes_no "Build documentation now?"; then
   echo "✓ Documentation built successfully"
 fi
 
+# ------------------------------------------------------------
+# Configuration-specific manuals (optional)
+# ------------------------------------------------------------
+if ask_yes_no "Build configuration-specific manuals?"; then
+  cd "$CVA6_REPO/docs"
+  
+  # Instruction set manuals (privileged & unprivileged)
+  echo "Building instruction set manuals..."
+  make -C 04_cv32a65x/riscv priv-html unpriv-html 2>/dev/null || echo "Warning: Could not build riscv manuals"
+  
+  # Design documentation
+  echo "Building design documentation..."
+  make -C 04_cv32a65x/design design-html 2>/dev/null || echo "Warning: Could not build design docs"
+  
+  echo "✓ Configuration-specific manuals built"
+fi
+
 # ============================================================
 # Smoke tests
 # ============================================================
@@ -286,6 +303,84 @@ else
 fi
 
 # ============================================================
+# Standalone Simulations (examples)
+# ============================================================
+echo ""
+echo "======================================"
+echo "Running Standalone Simulations"
+echo "======================================"
+
+# Default verification environment variables
+DV_TARGET="cv64a6_imafdc_sv39"
+DV_SIMULATORS="veri-testharness,spike"
+DV_TESTLISTS="../tests/testlist_riscv-tests-$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-$DV_TARGET-v.yaml"
+
+# Source setup-env.sh for simulations
+if ask_yes_no "Source setup-env.sh for simulations?"; then
+  source verif/sim/setup-env.sh
+  echo "✓ setup-env.sh sourced"
+fi
+
+# Hello World simulation
+if ask_yes_no "Run hello_world simulation?"; then
+  export DV_SIMULATORS=veri-testharness
+  cd ./verif/sim
+  python3 cva6.py --target cv32a60x --iss=$DV_SIMULATORS --iss_yaml=cva6.yaml \
+    --c_tests ../tests/custom/hello_world/hello_world.c \
+    --linker=../../config/gen_from_riscv_config/linker/link.ld \
+    --gcc_opts="-static -mcmodel=medany -fvisibility=hidden -nostdlib \
+    -nostartfiles -g ../tests/custom/common/syscalls.c \
+    ../tests/custom/common/crt.S -lgcc \
+    -I../tests/custom/env -I../tests/custom/common"
+  cd "$CVA6_REPO"
+  echo "✓ hello_world simulation completed"
+fi
+
+# RISC-V Proxy Kernel simulation (for printf support)
+if ask_yes_no "Run veri-testharness-pk simulation?"; then
+  export DV_SIMULATORS=veri-testharness-pk
+  bash verif/regress/veri-testharness-pk-tests.sh
+  echo "✓ veri-testharness-pk simulation completed"
+fi
+
+# VCS with Verdi
+if ask_yes_no "Enable Verdi for VCS simulations?"; then
+  export VERDI=1
+  echo "✓ VERDI=1 enabled (for VCS simulations)"
+fi
+
+# Regression tests
+if ask_yes_no "Run riscv-arch-test regression suite?"; then
+  export DV_SIMULATORS=veri-testharness,spike
+  bash verif/regress/dv-riscv-arch-test.sh
+  echo "✓ riscv-arch-test regression completed"
+fi
+
+# Waveform generation
+if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
+  export DV_SIMULATORS=veri-testharness,spike
+  export TRACE_FAST=1
+  echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
+  echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
+fi
+
+# Coverage and Verification Plan (VCS only)
+if ask_yes_no "Enable coverage for VCS simulations?"; then
+  export cov=1
+  echo "✓ Coverage enabled (cov=1)"
+fi
+
+# Log files info
+echo ""
+echo "Log files location: ./verif/sim/out_YEAR-MONTH-DAY/"
+echo "  - directed_asm_tests/: compiled assembly tests"
+echo "  - directed_c_tests/: compiled C tests"
+echo "  - spike_sim/: Spike simulation logs"
+echo "  - veri_testharness_sim/: Verilator simulation logs"
+echo "  - veri-testharness-pk_sim/: Proxy kernel simulation logs"
+echo "  - iss_regr.log: Regression test comparison log"
+
+# ============================================================
 # Environment persistence
 # ============================================================
 if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
@@ -299,7 +394,9 @@ export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
 export SPIKE_ROOT="$SPIKE_INSTALL_DIR"
 export RISCV="$RISCV"
 export INSTALL_DIR="$RISCV"
-export DV_SIMULATORS=veri-testharness
+export DV_SIMULATORS=veri-testharness,spike
+export DV_TARGET=cv64a6_imafdc_sv39
+export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
 
 # Add Verilator to PATH
 case ":\$PATH:" in
