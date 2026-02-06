@@ -254,22 +254,74 @@ else
 fi
 
 # ============================================================
+# Install Verilator and Spike using CVA6 official scripts
+# ============================================================
+cd "$CVA6_REPO"
+
+# Install Verilator (uses v5.008 with required patch for CVA6)
+echo "Installing Verilator..."
+bash verif/regress/install-verilator.sh
+
+# Install Spike (uses vendorized version in CVA6 repo)
+echo "Installing Spike..."
+bash verif/regress/install-spike.sh
+
+# Get the actual installation paths
+VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
+SPIKE_INSTALL_DIR="$CVA6_REPO/tools/spike"
+
+# Verify installations
+if [[ -f "$VERILATOR_INSTALL_DIR/bin/verilator" ]]; then
+  VERILATOR_VERSION=$("$VERILATOR_INSTALL_DIR/bin/verilator" --version 2>&1 || echo "unknown")
+  echo "✓ Verilator installed: $VERILATOR_VERSION"
+else
+  echo "WARNING: Verilator installation may have failed"
+fi
+
+if [[ -f "$SPIKE_INSTALL_DIR/bin/spike" ]]; then
+  SPIKE_VERSION=$("$SPIKE_INSTALL_DIR/bin/spike" --version 2>&1 || echo "unknown")
+  echo "✓ Spike installed: $SPIKE_VERSION"
+else
+  echo "WARNING: Spike installation may have failed"
+fi
+
+# ============================================================
 # Environment persistence
 # ============================================================
-if ask_yes_no "Add RISCV and toolchain to ~/.bashrc?"; then
-  if ! grep -q "RISC-V Toolchain (CVA6)" "$HOME/.bashrc"; then
+if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
+  if ! grep -q "CVA6 Environment" "$HOME/.bashrc"; then
     cat >> "$HOME/.bashrc" << EOF
 
-# ---- RISC-V Toolchain (CVA6) ----
+# ---- CVA6 Environment ----
+export CVA6_REPO_DIR="$CVA6_REPO"
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
+export SPIKE_ROOT="$SPIKE_INSTALL_DIR"
 export RISCV="$RISCV"
+export INSTALL_DIR="$RISCV"
+export DV_SIMULATORS=veri-testharness
+
+# Add Verilator to PATH
+case ":\$PATH:" in
+  *":\$VERILATOR_INSTALL_DIR/bin:"*) ;;
+  *) export PATH="\$VERILATOR_INSTALL_DIR/bin:\$PATH" ;;
+esac
+
+# Add Spike to PATH
+case ":\$PATH:" in
+  *":\$SPIKE_INSTALL_DIR/bin:"*) ;;
+  *) export PATH="\$SPIKE_INSTALL_DIR/bin:\$PATH" ;;
+esac
+
+# Add RISCV toolchain to PATH
 case ":\$PATH:" in
   *":\$RISCV/bin:"*) ;;
   *) export PATH="\$RISCV/bin:\$PATH" ;;
 esac
 EOF
-    echo "✓ RISC-V environment added to ~/.bashrc"
+    echo "✓ CVA6 environment added to ~/.bashrc"
   else
-    echo "✓ RISC-V environment already present in ~/.bashrc"
+    echo "✓ CVA6 environment already present in ~/.bashrc"
   fi
 fi
 
@@ -322,3 +374,10 @@ echo "======================================"
 #rm -Rf cva6 RISCV && mkdir RISCV
 #git clone https://github.com/openhwgroup/cva6.git
 #./CVA6InstallScript/cva6Install.sh
+
+
+
+
+#TODO
+
+
