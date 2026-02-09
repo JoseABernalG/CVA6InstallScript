@@ -10,9 +10,21 @@ expand_path() {
 
 ask_yes_no() {
   local prompt="$1"
-  read -p "$prompt (y/n): " ans
-  [[ "$ans" =~ ^[Yy]$ ]]
+  local ans
+  while true; do
+    read -p "$prompt (y/n): " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      return 0
+    elif [[ "$ans" =~ ^[Nn]$ ]]; then
+      return 1
+    else
+      echo "  Please answer 'y' (yes) or 'n' (no)."
+    fi
+  done
 }
+
+# Enable tab completion for path inputs
+bind 'set completion-ignore-case on' 2>/dev/null || true
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -38,8 +50,17 @@ require_packages() {
 # ============================================================
 # Paths
 # ============================================================
-read -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
-read -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
+echo ""
+echo "Enter paths (use TAB for autocomplete):"
+echo ""
+# Use -e to enable readline (tab completion)
+if [ -t 0 ]; then
+  read -e -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
+  read -e -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
+else
+  read -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
+  read -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
+fi
 
 CVA6_REPO=$(realpath "$(expand_path "$CVA6_REPO")")
 RISCV=$(realpath "$(expand_path "$RISCV")")
@@ -53,17 +74,22 @@ export RISCV INSTALL_DIR="$RISCV"
 # Threads
 # ============================================================
 echo ""
-read -p "Use all available threads? (y/n): " opti
-case "$opti" in
-  y|Y) NUM_JOBS=$(nproc) ;;
-  n|N)
-    read -p "Enter number of threads: " NUM_JOBS
-    ;;
-  *)
-    echo "Invalid option, using default (1)"
-    NUM_JOBS=1
-    ;;
-esac
+while true; do
+  read -p "Use all available threads? (y/n): " opti
+  case "$opti" in
+    y|Y) 
+      NUM_JOBS=$(nproc)
+      break
+      ;;
+    n|N)
+      read -p "Enter number of threads: " NUM_JOBS
+      break
+      ;;
+    *)
+      echo "  Please answer 'y' (yes) or 'n' (no)."
+      ;;
+  esac
+done
 
 export NUM_JOBS
 echo "Using $NUM_JOBS build threads"
@@ -127,20 +153,22 @@ DEFAULT_CONFIG_NAME="gcc-${GCC_VER}-BareMetal"
 echo ""
 echo "Detected GCC-based config name:"
 echo "  $DEFAULT_CONFIG_NAME"
-read -p "Use this config name? (y/n) [default]: " opti
-
-case "$opti" in
-  y|Y|"")
-    CONFIG_NAME="$DEFAULT_CONFIG_NAME"
-    ;;
-  n|N)
-    read -p "Enter custom config name: " CONFIG_NAME
-    ;;
-  *)
-    echo "Invalid option, using default config name"
-    CONFIG_NAME="$DEFAULT_CONFIG_NAME"
-    ;;
-esac
+while true; do
+  read -p "Use this config name? (y/n) [default]: " opti
+  case "$opti" in
+    y|Y|"")
+      CONFIG_NAME="$DEFAULT_CONFIG_NAME"
+      break
+      ;;
+    n|N)
+      read -p "Enter custom config name: " CONFIG_NAME
+      break
+      ;;
+    *)
+      echo "  Please answer 'y' (yes) or 'n' (no)."
+      ;;
+  esac
+done
 
 export CONFIG_NAME
 echo "Using config name: $CONFIG_NAME"
@@ -149,14 +177,14 @@ echo "Using config name: $CONFIG_NAME"
 # Python virtual environment
 # ============================================================
 USE_PYTHON=false
-if ask_yes_no "Use Python virtual environment (ScammaCVA6)?"; then
+if ask_yes_no "Use Python virtual environment (ScamaCVA6)?"; then
   USE_PYTHON=true
   cd "$HOME"
-  if [[ ! -d ScammaCVA6 ]]; then
-    echo "Creating Python venv: ScammaCVA6"
-    python3 -m venv ScammaCVA6
+  if [[ ! -d ScamaCVA6 ]]; then
+    echo "Creating Python venv: ScamaCVA6"
+    python3 -m venv ScamaCVA6
   fi
-  source ScammaCVA6/bin/activate
+  source ScamaCVA6/bin/activate
   pip install --upgrade pip
   pip install rstcloth mako mdutils recommonmark
   echo "✓ Python virtual environment ready"
@@ -257,20 +285,6 @@ if ask_yes_no "Build configuration-specific manuals?"; then
 fi
 
 # ============================================================
-# Smoke tests
-# ============================================================
-if ask_yes_no "Run smoke tests now?"; then
-  $USE_PYTHON
-
-  echo "Running smoke tests..."
-  cd "$CVA6_REPO"
-  bash verif/regress/smoke-gen_tests.sh
-  echo "✓ Smoke tests completed"
-else
-  echo "Skipping smoke tests."
-fi
-
-# ============================================================
 # Install Verilator and Spike using CVA6 official scripts
 # ============================================================
 cd "$CVA6_REPO"
@@ -279,12 +293,43 @@ cd "$CVA6_REPO"
 echo "Installing Verilator..."
 bash verif/regress/install-verilator.sh
 
+# Fix: Copy Verilator headers to include/ directory (install script doesn't do this correctly)
+echo "Fixing Verilator headers..."
+mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
+cp -r "$CVA6_REPO/tools/verilator-v5.008/build-v5.008/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
+cp -r "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
+echo "✓ Verilator headers fixed"
+
+# Create symlink for DPI headers (Spike expects headers in include/vltstd/)
+if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; then
+  if [[ ! -d "$CVA6_REPO/tools/verilator-v5.008/include/vltstd" ]]; then
+    echo "Creating DPI headers directory..."
+    mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
+    echo "Creating symlink for DPI headers..."
+    ln -s "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" "$CVA6_REPO/tools/verilator-v5.008/include/vltstd"
+    echo "✓ DPI headers symlink created"
+  else
+    echo "✓ DPI headers already available"
+  fi
+  
+  # Also create symlink in CVA6 repo root for Spike build system
+  if [[ ! -d "$CVA6_REPO/include/vltstd" ]]; then
+    echo "Creating DPI headers symlink in CVA6 repo root..."
+    mkdir -p "$CVA6_REPO/include"
+    ln -sf /Tools/cva6/tools/verilator-v5.008/share/verilator/include/vltstd "$CVA6_REPO/include/vltstd"
+    echo "✓ DPI headers symlink in repo root created"
+  fi
+fi
+
+# Set Verilator environment variables BEFORE installing Spike
+export VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+
 # Install Spike (uses vendorized version in CVA6 repo)
 echo "Installing Spike..."
 bash verif/regress/install-spike.sh
 
 # Get the actual installation paths
-VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
 SPIKE_INSTALL_DIR="$CVA6_REPO/tools/spike"
 
 # Verify installations
@@ -303,6 +348,38 @@ else
 fi
 
 # ============================================================
+# Smoke tests
+# ============================================================
+# Source setup-env.sh BEFORE smoke tests to ensure environment is configured
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
+export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+export PATH="$RISCV/bin:$PATH"
+export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
+export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
+export SPIKE_SRC_DIR="${SPIKE_SRC_DIR:-$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim}"
+export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
+
+# Source setup-env.sh for simulations
+if ask_yes_no "Source setup-env.sh for simulations?"; then
+  source verif/sim/setup-env.sh
+  echo "✓ setup-env.sh sourced"
+fi
+
+if ask_yes_no "Run smoke tests now?"; then
+  $USE_PYTHON
+
+  echo "Running smoke tests..."
+  cd "$CVA6_REPO"
+  bash verif/regress/smoke-gen_tests.sh
+  echo "✓ Smoke tests completed"
+else
+  echo "Skipping smoke tests."
+fi
+
+# ============================================================
 # Standalone Simulations (examples)
 # ============================================================
 echo ""
@@ -315,10 +392,15 @@ DV_TARGET="cv64a6_imafdc_sv39"
 DV_SIMULATORS="veri-testharness,spike"
 DV_TESTLISTS="../tests/testlist_riscv-tests-$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-$DV_TARGET-v.yaml"
 
-# Source setup-env.sh for simulations
-if ask_yes_no "Source setup-env.sh for simulations?"; then
+# Note: setup-env.sh has already been sourced in the previous section
+if [[ -z "$RISCV_CC" ]]; then
+  echo "WARNING: setup-env.sh may not have been sourced. Sourcing now..."
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+  export PATH="$RISCV/bin:$PATH"
+  export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+  export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
+  export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
   source verif/sim/setup-env.sh
-  echo "✓ setup-env.sh sourced"
 fi
 
 # Hello World simulation
@@ -392,8 +474,30 @@ export CVA6_REPO_DIR="$CVA6_REPO"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
 export SPIKE_ROOT="$SPIKE_INSTALL_DIR"
+export SPIKE_SRC_DIR="$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim"
+export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
 export RISCV="$RISCV"
 export INSTALL_DIR="$RISCV"
+
+# Set default variables to avoid unbound variable errors
+export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
+
+# Ensure RISCV toolchain path is first in PATH (before Xilinx tools)
+export PATH="$RISCV/bin:$PATH"
+
+export CV_SW_PREFIX="\${CV_SW_PREFIX:-riscv-none-elf-}"
+export RISCV_CC="\${RISCV_CC:-$RISCV/bin/\${CV_SW_PREFIX}gcc}"
+export RISCV_OBJCOPY="\${RISCV_OBJCOPY:-$RISCV/bin/\${CV_SW_PREFIX}objcopy}"
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
+export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
+
+# Source CVA6 simulation environment (must be after LD_LIBRARY_PATH and CV_SW_PREFIX)
+if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
+    source "$CVA6_REPO/verif/sim/setup-env.sh"
+fi
+
+# Default simulation settings
 export DV_SIMULATORS=veri-testharness,spike
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
@@ -435,14 +539,13 @@ echo "Toolchain config : $CONFIG_NAME"
 echo "RISCV path       : $RISCV"
 echo ""
 echo "To activate Python venv:"
-echo "  source ~/ScammaCVA6/bin/activate"
+echo "  source ~/ScamaCVA6/bin/activate"
 echo ""
 echo "To set environment for future sessions:"
 echo "  export LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\""
-#echo "  export C_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$C_INCLUDE_PATH\""
-#echo "  export CPLUS_INCLUDE_PATH=\"$VERILATOR_INCLUDE:\$CPLUS_INCLUDE_PATH\""
+#include "$VERILATOR_INCLUDE:\$C_INCLUDE_PATH\""
+#include "$VERILATOR_INCLUDE:\$CPLUS_INCLUDE_PATH\""
 echo "======================================"
-
 
 
 
@@ -456,7 +559,6 @@ echo "======================================"
 #rm -Rf cva6 RISCV && mkdir RISCV
 #git clone https://github.com/openhwgroup/cva6.git
 #./CVA6InstallScript/cva6Install.sh
-
 
 
 
@@ -476,5 +578,3 @@ echo "======================================"
 
 
 #TODO
-
-
