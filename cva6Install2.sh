@@ -2,243 +2,625 @@
 set -euo pipefail
 
 # ============================================================
-# Global vars
-# ============================================================
-
-VERILATOR_INCLUDE=""
-CONFIG_NAME=""
-
-# ============================================================
 # Helpers
 # ============================================================
-
 expand_path() {
   [[ "$1" == "~"* ]] && echo "${1/#\~/$HOME}" || echo "$1"
 }
 
 ask_yes_no() {
   local prompt="$1"
-  read -p "$prompt (y/n): " ans
-  [[ "$ans" =~ ^[Yy]$ ]]
+  local ans
+  while true; do
+    read -p "$prompt (y/n): " ans
+    if [[ "$ans" =~ ^[Yy]$ ]]; then
+      return 0
+    elif [[ "$ans" =~ ^[Nn]$ ]]; then
+      return 1
+    else
+      echo "  Please answer 'y' (yes) or 'n' (no)."
+    fi
+  done
 }
 
-# ============================================================
-# Environment initializer (robust)
-# ============================================================
+# Enable tab completion for path inputs
+bind 'set completion-ignore-case on' 2>/dev/null || true
 
-init_environment() {
-    echo "Initializing environment..."
-
-    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-
-    if [[ -z "${CV_SW_PREFIX:-}" ]]; then
-        export CV_SW_PREFIX="riscv64-unknown-elf-"
-    fi
-
-    if [[ -z "${RISCV_CC:-}" ]]; then
-        export RISCV_CC="$RISCV/bin/${CV_SW_PREFIX}gcc"
-    fi
-
-    if [[ -z "${RISCV_OBJCOPY:-}" ]]; then
-        export RISCV_OBJCOPY="$RISCV/bin/${CV_SW_PREFIX}objcopy"
-    fi
-
-    # Detect Verilator headers
-    if [[ -z "${VERILATOR_INCLUDE:-}" ]]; then
-        VERILATOR_INCLUDE=$(find "$CVA6_REPO/tools" \
-            -type f -name vpi_user.h 2>/dev/null | head -n1 || true)
-
-        if [[ -n "$VERILATOR_INCLUDE" ]]; then
-            VERILATOR_INCLUDE=$(dirname "$VERILATOR_INCLUDE")
-        fi
-    fi
-
-    if [[ -n "${VERILATOR_INCLUDE:-}" ]]; then
-        export C_INCLUDE_PATH="$VERILATOR_INCLUDE${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-        export CPLUS_INCLUDE_PATH="$VERILATOR_INCLUDE${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-    fi
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
 }
 
-# ============================================================
-# Ask toolchain config
-# ============================================================
+require_packages() {
+  local missing=()
+  for pkg in "$@"; do
+    dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+  done
 
-ask_toolchain_config() {
-
-    if [[ -z "${CONFIG_NAME:-}" ]]; then
-        CONFIG_DIR="$CVA6_REPO/util/toolchain-builder/config"
-
-        echo ""
-        echo "Available toolchain configs:"
-
-        mapfile -t CONFIGS < <(ls "$CONFIG_DIR"/*.sh \
-            | xargs -n1 basename \
-            | sed 's/.sh$//' \
-            | sort)
-
-        for i in "${!CONFIGS[@]}"; do
-            echo "$((i+1))) ${CONFIGS[$i]}"
-        done
-
-        echo ""
-        read -p "Select config number or enter custom name: " sel
-
-        if [[ "$sel" =~ ^[0-9]+$ ]] && \
-           (( sel>=1 && sel<=${#CONFIGS[@]} )); then
-            CONFIG_NAME="${CONFIGS[$((sel-1))]}"
-        else
-            CONFIG_NAME="$sel"
-        fi
-
-        export CONFIG_NAME
-    fi
+  if (( ${#missing[@]} > 0 )); then
+    echo ""
+    echo "Installing missing system packages:"
+    echo "  ${missing[*]}"
+    sudo apt update
+    sudo apt install -y "${missing[@]}"
+  else
+    echo "✓ All required system packages are already installed"
+  fi
 }
 
 # ============================================================
 # Paths
 # ============================================================
-
-DEFAULT_CVA6_REPO="$HOME/cva6"
-DEFAULT_RISCV="$HOME/riscv"
-
-read -p "Enter CVA6 repo path [${DEFAULT_CVA6_REPO}]: " CVA6_REPO
-read -p "Enter RISCV install path [${DEFAULT_RISCV}]: " RISCV
-
-CVA6_REPO=${CVA6_REPO:-$DEFAULT_CVA6_REPO}
-RISCV=${RISCV:-$DEFAULT_RISCV}
+echo ""
+echo "Enter paths (use TAB for autocomplete):"
+echo ""
+# Use -e to enable readline (tab completion)
+if [ -t 0 ]; then
+  read -e -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
+  read -e -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
+else
+  read -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
+  read -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
+fi
 
 CVA6_REPO=$(realpath "$(expand_path "$CVA6_REPO")")
 RISCV=$(realpath "$(expand_path "$RISCV")")
 
-[[ ! -d "$CVA6_REPO" ]] && echo "ERROR: repo not found" && exit 1
+[[ ! -d "$CVA6_REPO" ]] && echo "ERROR: CVA6 repo not found" && exit 1
 mkdir -p "$RISCV"
 
-export RISCV
-export INSTALL_DIR="$RISCV"
+export RISCV INSTALL_DIR="$RISCV"
 
 # ============================================================
 # Threads
 # ============================================================
-
 echo ""
-read -p "Use all available threads? (y/n): " opti
-case "$opti" in
-  y|Y) NUM_JOBS=$(nproc) ;;
-  n|N) read -p "Threads: " NUM_JOBS ;;
-  *) echo "Invalid"; exit 1 ;;
-esac
+while true; do
+  read -p "Use all available threads? (y/n): " opti
+  case "$opti" in
+    y|Y) 
+      NUM_JOBS=$(nproc)
+      break
+      ;;
+    n|N)
+      read -p "Enter number of threads: " NUM_JOBS
+      break
+      ;;
+    *)
+      echo "  Please answer 'y' (yes) or 'n' (no)."
+      ;;
+  esac
+done
 
 export NUM_JOBS
-echo "Using $NUM_JOBS threads"
+echo "Using $NUM_JOBS build threads"
 
 # ============================================================
-# Menu Loop
+# System dependencies (verified)
 # ============================================================
+echo ""
+echo "Checking system dependencies..."
 
-while true; do
+require_packages \
+  autoconf automake autotools-dev curl git gawk \
+  build-essential bison flex texinfo gperf \
+  libmpc-dev libmpfr-dev libgmp-dev libtool bc \
+  zlib1g-dev help2man device-tree-compiler \
+  python3 python3-pip python3-venv \
+  ruby ruby-dev cmake pkg-config \
+  texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
+  pkg-config libxml2-dev libxslt1-dev zlib1g-dev libglib2.0-dev \
+  libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libpixman-1-dev \
+  nodejs npm
+
+# ------------------------------------------------------------
+# Install documentation image generators (Node.js tools)
+# ------------------------------------------------------------
+if ! command -v bytefield-svg >/dev/null 2>&1; then
+  echo "Installing bytefield-svg..."
+  sudo npm install -g bytefield-svg
+else
+  echo "✓ bytefield-svg is already installed"
+fi
+
+if ! command -v wavedrom-cli >/dev/null 2>&1; then
+  echo "Installing wavedrom-cli..."
+  sudo npm install -g wavedrom-cli
+else
+  echo "✓ wavedrom-cli is already installed"
+fi
+
+# ============================================================
+# Ruby gems (docs)
+# ============================================================
+if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
+  echo "Installing Ruby gems for documentation..."
+  sudo gem install \
+    asciidoctor \
+    asciidoctor-bibtex \
+    asciidoctor-diagram \
+    asciidoctor-lists \
+    asciidoctor-mathematical \
+    pygments.rb
+  echo "✓ Ruby gems installed"
+fi
+
+# ============================================================
+# GCC config name
+# ============================================================
+GCC_VER=$(gcc -dumpversion 2>/dev/null || echo "unknown")
+DEFAULT_CONFIG_NAME="gcc-${GCC_VER}-BareMetal"
 
 echo ""
-echo "Select steps:"
-echo "1) Fix machine.adoc"
-echo "2) Update submodules"
-echo "3) Build toolchain"
-echo "4) Install/verify Verilator"
-echo "5) Install/verify Spike"
-echo "6) Run smoke tests"
-echo "7) Build documentation"
-echo "8) Add RISCV to ~/.bashrc"
-echo "0) Exit"
+echo "Detected GCC-based config name:"
+echo "  $DEFAULT_CONFIG_NAME"
+while true; do
+  read -p "Use this config name? (y/n) [default]: " opti
+  case "$opti" in
+    y|Y|"")
+      CONFIG_NAME="$DEFAULT_CONFIG_NAME"
+      break
+      ;;
+    n|N)
+      read -p "Enter custom config name: " CONFIG_NAME
+      break
+      ;;
+    *)
+      echo "  Please answer 'y' (yes) or 'n' (no)."
+      ;;
+  esac
+done
 
-read -p "Choice: " choices
-IFS=',' read -ra CHOICES <<< "$choices"
+export CONFIG_NAME
+echo "Using config name: $CONFIG_NAME"
 
-for choice in "${CHOICES[@]}"; do
-case $choice in
-
-0)
-  echo "Exiting installer."
-  exit 0
-  ;;
-
-1)
-  echo "Fixing documentation..."
-  MACHINE_ADOC="$CVA6_REPO/docs/riscv-isa/src/machine.adoc"
-
-  if [[ -f "$MACHINE_ADOC" ]]; then
-      echo "Checking endif::[] near line 3114..."
-
-      # Verifica si ya existe en el rango cercano
-      if sed -n '3105,3125p' "$MACHINE_ADOC" | grep -q 'endif::\[\]'; then
-          echo "Documentation already patched."
-      else
-          echo "Inserting endif::[] at line 3114..."
-          sed -i '3114i endif::[]' "$MACHINE_ADOC"
-          echo "Patch applied successfully."
-      fi
-  else
-      echo "machine.adoc not found."
+# ============================================================
+# Python virtual environment (using pyenv)
+# ============================================================
+USE_PYTHON=false
+if ask_yes_no "Use Python virtual environment (cva6)?"; then
+  USE_PYTHON=true
+  
+  # Set up pyenv
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  
+  # Check if pyenv is installed
+  if [[ ! -f "$PYENV_ROOT/bin/pyenv" ]]; then
+    echo "ERROR: pyenv is not installed at $PYENV_ROOT"
+    echo "Visit: https://github.com/pyenv/pyenv#installation"
+    exit 1
   fi
-  ;;
+  
+  # Initialize pyenv
+  eval "$(pyenv init -)" 2>/dev/null || true
+  eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+  
+  # Verify pyenv virtualenv is available
+  if ! pyenv virtualenvs >/dev/null 2>&1; then
+    echo "ERROR: pyenv-virtualenv plugin is not installed."
+    echo "Visit: https://github.com/pyenv/pyenv-virtualenv#installation"
+    exit 1
+  fi
+  
+  # Detect Python version from system
+  PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))" 2>/dev/null || echo "3.10")
+  
+  # Check if Python version is available in pyenv (don't install, just check)
+  VENV_NAME="cva6"
+  if [[ -d "$HOME/.pyenv/versions/$VENV_NAME" ]]; then
+    echo "Using existing Python venv '$VENV_NAME'..."
+  else
+    echo "ERROR: Python venv '$VENV_NAME' not found."
+    echo "Please create it first with: pyenv virtualenv $PYTHON_VERSION $VENV_NAME"
+    exit 1
+  fi
+  
+  # Activate the virtual environment for this session
+  echo "Activating Python venv '$VENV_NAME'..."
+  export VIRTUAL_ENV="$HOME/.pyenv/versions/$VENV_NAME"
+  export PATH="$VIRTUAL_ENV/bin:$PATH"
+  echo "✓ Python virtual environment activated"
+fi
 
-2)
-  cd "$CVA6_REPO"
-  git submodule update --init --recursive
-  ;;
+# ============================================================
+# Git + toolchain
+# ============================================================
+cd "$CVA6_REPO"
+echo "Initializing git submodules..."
+git submodule update --init --recursive
 
-3)
-  echo "Building toolchain..."
-  cd "$CVA6_REPO"
+echo "Fetching toolchain sources..."
+bash util/toolchain-builder/get-toolchain.sh
 
-  ask_toolchain_config
+echo "Applying CVA6 GCC patch..."
+cd util/toolchain-builder/src/gcc
+git apply ../../gcc-cva6-tune.patch || echo "Patch already applied or not found"
 
-  bash util/toolchain-builder/get-toolchain.sh "$CONFIG_NAME"
+echo "Building toolchain..."
+cd "$CVA6_REPO/util/toolchain-builder"
+bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
 
-  cd util/toolchain-builder/src/gcc
-  git apply ../../gcc-cva6-tune.patch || true
+# ============================================================
+# Python requirements
+# ============================================================
+if $USE_PYTHON; then
+  echo "Installing Python requirements..."
+  pip install -r "$CVA6_REPO/verif/sim/dv/requirements.txt"
+  pip install -r "$CVA6_REPO/docs/requirements.txt"
+  pip install rstcloth mako mdutils recommonmark
+fi
 
-  cd "$CVA6_REPO/util/toolchain-builder"
-  bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
-  ;;
 
-4)
-  cd "$CVA6_REPO"
-  bash verif/regress/install-verilator.sh
-  ;;
+# ============================================================
+# Fix documentation bug (missing endif in machine.adoc)
+# Must run before toolchain/doc build
+# ============================================================
+MACHINE_ADOC="$CVA6_REPO/docs/riscv-isa/src/machine.adoc"
 
-5)
-  cd "$CVA6_REPO"
-  bash verif/regress/install-spike.sh
-  ;;
+echo "Checking machine.adoc preprocessor directives..."
 
-6)
-  echo "Running smoke tests..."
-  cd "$CVA6_REPO"
+if [[ -f "$MACHINE_ADOC" ]]; then
+    LINE_CONTENT=$(sed -n '3114p' "$MACHINE_ADOC")
 
-  init_environment
-  source verif/sim/setup-env.sh
+    if [[ "$LINE_CONTENT" != *"endif::[]"* ]]; then
+        echo "Fixing missing endif::[] in machine.adoc (line 3114)..."
+        sed -i '3114a endif::[]' "$MACHINE_ADOC"
+        echo "Patch applied."
+    else
+        echo "machine.adoc already correct."
+    fi
+else
+    echo "WARNING: machine.adoc not found, skipping fix."
+fi
 
-  bash verif/regress/smoke-gen_tests.sh
-  ;;
+# ============================================================
+# Copy missing cv64a6_mmu_config_pkg.sv
+# ============================================================
+SRC_FILE="$CVA6_REPO/core/include/deprecated_packages/cv64a6_mmu_config_pkg.sv"
+DEST_FILE="$CVA6_REPO/core/include/cv64a6_mmu_config_pkg.sv"
 
-7)
+if [[ -f "$DEST_FILE" ]]; then
+    echo "cv64a6_mmu_config_pkg.sv already exists, skipping copy."
+else
+    if [[ -f "$SRC_FILE" ]]; then
+        echo "Copying cv64a6_mmu_config_pkg.sv..."
+        cp "$SRC_FILE" "$DEST_FILE"
+        echo "Done."
+    else
+        echo "WARNING: Source file not found: $SRC_FILE"
+    fi
+fi
+
+# ============================================================
+# Docs build
+# ============================================================
+if ask_yes_no "Build documentation now?"; then
   cd "$CVA6_REPO/docs"
   make
-  ;;
+  echo "✓ Documentation built successfully"
+fi
 
-8)
-cat >> "$HOME/.bashrc" << EOF
+# ------------------------------------------------------------
+# Configuration-specific manuals (optional)
+# ------------------------------------------------------------
+if ask_yes_no "Build configuration-specific manuals?"; then
+  cd "$CVA6_REPO/docs"
+  
+  # Instruction set manuals (privileged & unprivileged)
+  echo "Building instruction set manuals..."
+  make -C 04_cv32a65x/riscv priv-html unpriv-html 2>/dev/null || echo "Warning: Could not build riscv manuals"
+  
+  # Design documentation
+  echo "Building design documentation..."
+  make -C 04_cv32a65x/design design-html 2>/dev/null || echo "Warning: Could not build design docs"
+  
+  echo "✓ Configuration-specific manuals built"
+fi
 
-# ---- CVA6 toolchain ----
+# ============================================================
+# Install Verilator and Spike using CVA6 official scripts
+# ============================================================
+cd "$CVA6_REPO"
+
+# Install Verilator (uses v5.008 with required patch for CVA6)
+echo "Installing Verilator..."
+bash verif/regress/install-verilator.sh
+
+# Fix: Copy Verilator headers to include/ directory (install script doesn't do this correctly)
+echo "Fixing Verilator headers..."
+mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
+cp -r "$CVA6_REPO/tools/verilator-v5.008/build-v5.008/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
+cp -r "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
+echo "✓ Verilator headers fixed"
+
+# Create symlink for DPI headers (Spike expects headers in include/vltstd/)
+if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; then
+  if [[ ! -d "$CVA6_REPO/tools/verilator-v5.008/include/vltstd" ]]; then
+    echo "Creating DPI headers directory..."
+    mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
+    echo "Creating symlink for DPI headers..."
+    ln -s "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" "$CVA6_REPO/tools/verilator-v5.008/include/vltstd"
+    echo "✓ DPI headers symlink created"
+  else
+    echo "✓ DPI headers already available"
+  fi
+  
+  # Also create symlink in CVA6 repo root for Spike build system
+  if [[ ! -d "$CVA6_REPO/include/vltstd" ]]; then
+    echo "Creating DPI headers symlink in CVA6 repo root..."
+    mkdir -p "$CVA6_REPO/include"
+    ln -sf /Tools/cva6/tools/verilator-v5.008/share/verilator/include/vltstd "$CVA6_REPO/include/vltstd"
+    echo "✓ DPI headers symlink in repo root created"
+  fi
+fi
+
+# Set Verilator environment variables BEFORE installing Spike
+export VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+
+# Install Spike (uses vendorized version in CVA6 repo)
+echo "Installing Spike..."
+bash verif/regress/install-spike.sh
+
+# Get the actual installation paths
+SPIKE_INSTALL_DIR="$CVA6_REPO/tools/spike"
+
+# Verify installations
+if [[ -f "$VERILATOR_INSTALL_DIR/bin/verilator" ]]; then
+  VERILATOR_VERSION=$("$VERILATOR_INSTALL_DIR/bin/verilator" --version 2>&1 || echo "unknown")
+  echo "✓ Verilator installed: $VERILATOR_VERSION"
+else
+  echo "WARNING: Verilator installation may have failed"
+fi
+
+if [[ -f "$SPIKE_INSTALL_DIR/bin/spike" ]]; then
+  SPIKE_VERSION=$("$SPIKE_INSTALL_DIR/bin/spike" --version 2>&1 || echo "unknown")
+  echo "✓ Spike installed: $SPIKE_VERSION"
+else
+  echo "WARNING: Spike installation may have failed"
+fi
+
+# ============================================================
+# Smoke tests
+# ============================================================
+# Source setup-env.sh BEFORE smoke tests to ensure environment is configured
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
+export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+export PATH="$RISCV/bin:$PATH"
+export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
+export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
+export SPIKE_SRC_DIR="${SPIKE_SRC_DIR:-$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim}"
+export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
+
+# Source setup-env.sh for simulations
+if ask_yes_no "Source setup-env.sh for simulations?"; then
+  source verif/sim/setup-env.sh
+  echo "✓ setup-env.sh sourced"
+fi
+
+if ask_yes_no "Run smoke tests now?"; then
+  $USE_PYTHON
+
+  echo "Running smoke tests..."
+  cd "$CVA6_REPO"
+  bash verif/regress/smoke-gen_tests.sh
+  echo "✓ Smoke tests completed"
+else
+  echo "Skipping smoke tests."
+fi
+
+# ============================================================
+# Standalone Simulations (examples)
+# ============================================================
+echo ""
+echo "======================================"
+echo "Running Standalone Simulations"
+echo "======================================"
+
+# Default verification environment variables
+DV_TARGET="cv64a6_imafdc_sv39"
+DV_SIMULATORS="veri-testharness,spike"
+DV_TESTLISTS="../tests/testlist_riscv-tests-$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-$DV_TARGET-v.yaml"
+
+# Note: setup-env.sh has already been sourced in the previous section
+if [[ -z "$RISCV_CC" ]]; then
+  echo "WARNING: setup-env.sh may not have been sourced. Sourcing now..."
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+  export PATH="$RISCV/bin:$PATH"
+  export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+  export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
+  export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
+  source verif/sim/setup-env.sh
+fi
+
+# Hello World simulation
+if ask_yes_no "Run hello_world simulation?"; then
+  export DV_SIMULATORS=veri-testharness
+  cd ./verif/sim
+  python3 cva6.py --target cv32a60x --iss=$DV_SIMULATORS --iss_yaml=cva6.yaml \
+    --c_tests ../tests/custom/hello_world/hello_world.c \
+    --linker=../../config/gen_from_riscv_config/linker/link.ld \
+    --gcc_opts="-static -mcmodel=medany -fvisibility=hidden -nostdlib \
+    -nostartfiles -g ../tests/custom/common/syscalls.c \
+    ../tests/custom/common/crt.S -lgcc \
+    -I../tests/custom/env -I../tests/custom/common"
+  cd "$CVA6_REPO"
+  echo "✓ hello_world simulation completed"
+fi
+
+# RISC-V Proxy Kernel simulation (for printf support)
+if ask_yes_no "Run veri-testharness-pk simulation?"; then
+  export DV_SIMULATORS=veri-testharness-pk
+  bash verif/regress/veri-testharness-pk-tests.sh
+  echo "✓ veri-testharness-pk simulation completed"
+fi
+
+# VCS with Verdi
+if ask_yes_no "Enable Verdi for VCS simulations?"; then
+  export VERDI=1
+  echo "✓ VERDI=1 enabled (for VCS simulations)"
+fi
+
+# Regression tests
+if ask_yes_no "Run riscv-arch-test regression suite?"; then
+  export DV_SIMULATORS=veri-testharness,spike
+  bash verif/regress/dv-riscv-arch-test.sh
+  echo "✓ riscv-arch-test regression completed"
+fi
+
+# Waveform generation
+if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
+  export DV_SIMULATORS=veri-testharness,spike
+  export TRACE_FAST=1
+  echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
+  echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
+fi
+
+# Coverage and Verification Plan (VCS only)
+if ask_yes_no "Enable coverage for VCS simulations?"; then
+  export cov=1
+  echo "✓ Coverage enabled (cov=1)"
+fi
+
+# Log files info
+echo ""
+echo "Log files location: ./verif/sim/out_YEAR-MONTH-DAY/"
+echo "  - directed_asm_tests/: compiled assembly tests"
+echo "  - directed_c_tests/: compiled C tests"
+echo "  - spike_sim/: Spike simulation logs"
+echo "  - veri_testharness_sim/: Verilator simulation logs"
+echo "  - veri-testharness-pk_sim/: Proxy kernel simulation logs"
+echo "  - iss_regr.log: Regression test comparison log"
+
+# ============================================================
+# Environment persistence
+# ============================================================
+if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
+  if ! grep -q "CVA6 Environment" "$HOME/.bashrc"; then
+    cat >> "$HOME/.bashrc" << EOF
+
+# ---- CVA6 Environment ----
+
+# Pyenv configuration for Python virtual environment
+export PATH="$HOME/.pyenv/bin:$PATH"
+export PATH="$HOME/.pyenv/shims:$PATH"
+eval "$(pyenv init -)"
+eval "$(pyenv virtualenv-init -)"
+
+# CVA6 Environment Variables
 export RISCV="$RISCV"
-export PATH="\$RISCV/bin:\$PATH"
+export INSTALL_DIR="$RISCV"
+export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
+export SPIKE_ROOT="$SPIKE_INSTALL_DIR"
+export SPIKE_SRC_DIR="$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim"
+export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
+export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
+export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
+export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
+export DV_SIMULATORS=veri-testharness,spike
+export DV_TARGET=cv64a6_imafdc_sv39
+export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
+
+# Add to PATH
+export PATH="$VERILATOR_INSTALL_DIR/bin:$PATH"
+export PATH="$SPIKE_INSTALL_DIR/bin:$PATH"
+export PATH="$RISCV/bin:$PATH"
+
+# To activate Python venv: pyenv activate cva6
+
 EOF
-echo "Added to ~/.bashrc"
-  ;;
+    echo "✓ CVA6 environment added to ~/.bashrc"
+  else
+    echo "✓ CVA6 environment already present in ~/.bashrc"
+  fi
+fi
 
-*)
-  echo "Invalid option: $choice"
-  ;;
+# Export minimal variables for current session (full config is in bashrc)
+export RISCV="$RISCV"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+
+# Source CVA6 simulation environment (must be after LD_LIBRARY_PATH and CV_SW_PREFIX)
+if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
+    source "$CVA6_REPO/verif/sim/setup-env.sh"
+fi
+
+# Default simulation settings
+export DV_SIMULATORS=veri-testharness,spike
+export DV_TARGET=cv64a6_imafdc_sv39
+export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
+
+# Add Verilator to PATH
+case ":\$PATH:" in
+  *":\$VERILATOR_INSTALL_DIR/bin:"*) ;;
+  *) export PATH="\$VERILATOR_INSTALL_DIR/bin:\$PATH" ;;
 esac
-done
 
-done
+# Add Spike to PATH
+case ":\$PATH:" in
+  *":\$SPIKE_INSTALL_DIR/bin:"*) ;;
+  *) export PATH="\$SPIKE_INSTALL_DIR/bin:\$PATH" ;;
+esac
+
+# Add RISCV toolchain to PATH
+case ":\$PATH:" in
+  *":\$RISCV/bin:"*) ;;
+  *) export PATH="\$RISCV/bin:\$PATH" ;;
+esac
+EOF
+    echo "✓ CVA6 environment added to ~/.bashrc"
+  else
+    echo "✓ CVA6 environment already present in ~/.bashrc"
+  fi
+fi
+
+# ============================================================
+# Deactivate virtual environment
+# ============================================================
+if $USE_PYTHON; then
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    deactivate 2>/dev/null || true
+    unset VIRTUAL_ENV
+  fi
+fi
+
+# ============================================================
+# Final message
+# ============================================================
+echo ""
+echo "======================================"
+echo "CVA6 installation completed successfully"
+echo ""
+echo "Toolchain config : $CONFIG_NAME"
+echo "RISCV path       : $RISCV"
+echo ""
+echo "To activate Python venv:"
+echo "  pyenv activate cva6"
+echo ""
+echo "To set environment for future sessions:"
+echo "  The environment is already configured in ~/.bashrc"
+echo ""
+echo "======================================"
+echo "UNINSTALL INSTRUCTIONS:"
+echo "======================================"
+echo ""
+echo "To uninstall CVA6, run:"
+echo "  bash $(dirname "$0")/cva6Uninstall.sh"
+echo ""
+echo "Or manually remove:"
+echo "  rm -rf $CVA6_REPO"
+echo "  rm -rf $RISCV"
+echo "  rm -rf $CVA6_REPO/tools/verilator-v5.008"
+echo "  rm -rf $CVA6_REPO/tools/spike"
+echo "  pyenv uninstall cva6"
+echo "  # Remove CVA6 Environment block from ~/.bashrc"
+echo "======================================"
+
