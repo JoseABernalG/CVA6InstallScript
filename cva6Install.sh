@@ -174,7 +174,7 @@ export CONFIG_NAME
 echo "Using config name: $CONFIG_NAME"
 
 # ============================================================
-# Python virtual environment (using pyenv)
+# Python virtual environment (using pyenv or system venv)
 # ============================================================
 USE_PYTHON=false
 if ask_yes_no "Use Python virtual environment (cva6)?"; then
@@ -184,11 +184,29 @@ if ask_yes_no "Use Python virtual environment (cva6)?"; then
   export PYENV_ROOT="$HOME/.pyenv"
   export PATH="$PYENV_ROOT/bin:$PATH"
   
-  # Check if pyenv is installed
+  # Check if pyenv is installed, if not, install it
   if [[ ! -f "$PYENV_ROOT/bin/pyenv" ]]; then
-    echo "ERROR: pyenv is not installed at $PYENV_ROOT"
-    echo "Visit: https://github.com/pyenv/pyenv#installation"
-    exit 1
+    echo "pyenv not found. Installing pyenv..."
+    
+    # Install dependencies for pyenv
+    sudo apt update
+    sudo apt install -y build-essential libssl-dev zlib1g-dev \
+      libbz2-dev libreadline-dev libsqlite3-dev wget \
+      llvm libncurses5-dev libncursesw5-dev \
+      tk-dev libffi-dev liblzma-dev
+    
+    # Install pyenv
+    curl https://pyenv.run | bash
+    
+    # Re-export pyenv paths after installation
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    
+    # Initialize pyenv
+    eval "$(pyenv init -)" 2>/dev/null || true
+    eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+    
+    echo "✓ pyenv installed successfully"
   fi
   
   # Initialize pyenv
@@ -205,14 +223,25 @@ if ask_yes_no "Use Python virtual environment (cva6)?"; then
   # Detect Python version from system
   PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))" 2>/dev/null || echo "3.10")
   
-  # Check if Python version is available in pyenv (don't install, just check)
+  # Check if Python version is available in pyenv
   VENV_NAME="cva6"
   if [[ -d "$HOME/.pyenv/versions/$VENV_NAME" ]]; then
     echo "Using existing Python venv '$VENV_NAME'..."
   else
-    echo "ERROR: Python venv '$VENV_NAME' not found."
-    echo "Please create it first with: pyenv virtualenv $PYTHON_VERSION $VENV_NAME"
-    exit 1
+    echo "Creating Python venv '$VENV_NAME' with Python $PYTHON_VERSION..."
+    
+    # Check if Python version is already installed in pyenv
+    if [[ ! -d "$HOME/.pyenv/versions/$PYTHON_VERSION" ]]; then
+      echo "Installing Python $PYTHON_VERSION in pyenv..."
+      pyenv install $PYTHON_VERSION
+      echo "✓ Python $PYTHON_VERSION installed"
+    else
+      echo "✓ Python $PYTHON_VERSION already installed in pyenv"
+    fi
+    
+    # Create the virtual environment
+    pyenv virtualenv $PYTHON_VERSION $VENV_NAME
+    echo "✓ Python venv '$VENV_NAME' created"
   fi
   
   # Activate the virtual environment for this session
@@ -591,9 +620,11 @@ echo ""
 echo "Toolchain config : $CONFIG_NAME"
 echo "RISCV path       : $RISCV"
 echo ""
-echo "To activate Python venv:"
-echo "  pyenv activate cva6"
-echo ""
+if $USE_PYTHON; then
+  echo "To activate Python venv:"
+  echo "  pyenv activate cva6"
+  echo ""
+fi
 echo "To set environment for future sessions:"
 echo "  The environment is already configured in ~/.bashrc"
 echo ""
@@ -609,7 +640,7 @@ echo "  rm -rf $CVA6_REPO"
 echo "  rm -rf $RISCV"
 echo "  rm -rf $CVA6_REPO/tools/verilator-v5.008"
 echo "  rm -rf $CVA6_REPO/tools/spike"
-echo "  pyenv uninstall cva6"
+echo "  pyenv uninstall cva6 2>/dev/null || true"
+echo "  rm -rf ~/.pyenv/versions/cva6 2>/dev/null || true"
 echo "  # Remove CVA6 Environment block from ~/.bashrc"
 echo "======================================"
-
