@@ -2,7 +2,10 @@
 set -euo pipefail
 
 # ============================================================
-# Helpers
+# CVA6 Installation Script
+# ============================================================
+# For known issues (especially on Kali Linux), see:
+# README_KNOWN_ISSUES.md
 # ============================================================
 expand_path() {
   [[ "$1" == "~"* ]] && echo "${1/#\~/$HOME}" || echo "$1"
@@ -108,9 +111,31 @@ require_packages \
   python3 python3-pip python3-venv \
   ruby ruby-dev cmake pkg-config \
   texlive-latex-base texlive-latex-extra texlive-fonts-recommended \
-  pkg-config libxml2-dev libxslt1-dev zlib1g-dev libglib2.0-dev \
-  libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libpixman-1-dev \
+  pkg-config libxml2-dev libxslt1-dev zlib1g-dev \
+  libcairo2-dev libpango1.0-dev libpixman-1-dev \
   nodejs npm
+
+# Install packages that may have issues on some distros (Kali, etc.)
+echo ""
+echo "Installing additional dependencies (may vary by distribution)..."
+
+# Try libgdk-pixbuf2.0-dev first, fall back to libgdk-pixbuf-xlib-2.0-dev
+if ! dpkg -s libgdk-pixbuf2.0-dev >/dev/null 2>&1; then
+  if dpkg -s libgdk-pixbuf-xlib-2.0-dev >/dev/null 2>&1; then
+    echo "✓ Using libgdk-pixbuf-xlib-2.0-dev (replaces libgdk-pixbuf2.0-dev)"
+  else
+    echo "Installing libgdk-pixbuf2.0-dev (or replacement)..."
+    sudo apt install -y libgdk-pixbuf2.0-dev libgdk-pixbuf-xlib-2.0-dev 2>/dev/null || \
+    sudo apt install -y libgdk-pixbuf-xlib-2.0-dev 2>/dev/null || \
+    echo "WARNING: gdk-pixbuf development package installation failed. You may need to install manually."
+  fi
+fi
+
+# Install libglib2.0-dev separately (may have issues on some distros like Kali)
+if ! dpkg -s libglib2.0-dev >/dev/null 2>&1; then
+  echo "Installing libglib2.0-dev (may have dependency issues on some distros)..."
+  sudo apt install -y libglib2.0-dev || echo "WARNING: libglib2.0-dev installation failed. You may need to install it manually."
+fi
 
 # ------------------------------------------------------------
 # Install documentation image generators (Node.js tools)
@@ -134,13 +159,18 @@ fi
 # ============================================================
 if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
   echo "Installing Ruby gems for documentation..."
+  
+  # Install core gems first
   sudo gem install \
     asciidoctor \
     asciidoctor-bibtex \
     asciidoctor-diagram \
     asciidoctor-lists \
-    asciidoctor-mathematical \
     pygments.rb
+  
+  # Install asciidoctor-mathematical separately (may have issues on some distros)
+  echo "Installing asciidoctor-mathematical (may fail on some systems)..."
+  sudo gem install asciidoctor-mathematical || echo "WARNING: asciidoctor-mathematical installation failed."
   echo "✓ Ruby gems installed"
 fi
 
@@ -174,52 +204,105 @@ export CONFIG_NAME
 echo "Using config name: $CONFIG_NAME"
 
 # ============================================================
-# Python virtual environment (using pyenv)
+# Python virtual environment (using pyenv OR system Python)
 # ============================================================
 USE_PYTHON=false
-if ask_yes_no "Use Python virtual environment (cva6)?"; then
+PYTHON_OPTION=""
+if ask_yes_no "Use Python virtual environment?"; then
   USE_PYTHON=true
   
-  # Set up pyenv
-  export PYENV_ROOT="$HOME/.pyenv"
-  export PATH="$PYENV_ROOT/bin:$PATH"
+  echo ""
+  echo "Choose Python installation method:"
+  echo "  1) Use system Python (python3-venv) - Recommended for clean installations"
+  echo "  2) Use pyenv (installs Python automatically) - More control"
   
-  # Check if pyenv is installed
-  if [[ ! -f "$PYENV_ROOT/bin/pyenv" ]]; then
-    echo "ERROR: pyenv is not installed at $PYENV_ROOT"
-    echo "Visit: https://github.com/pyenv/pyenv#installation"
-    exit 1
-  fi
+  while true; do
+    read -p "Choose option (1/2) [default: 1]: " PYTHON_OPTION
+    case "$PYTHON_OPTION" in
+      1|"") 
+        PYTHON_OPTION="system"
+        break
+        ;;
+      2)
+        PYTHON_OPTION="pyenv"
+        break
+        ;;
+      *)
+        echo "  Please enter '1' or '2'."
+        ;;
+    esac
+  done
   
-  # Initialize pyenv
-  eval "$(pyenv init -)" 2>/dev/null || true
-  eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
-  
-  # Verify pyenv virtualenv is available
-  if ! pyenv virtualenvs >/dev/null 2>&1; then
-    echo "ERROR: pyenv-virtualenv plugin is not installed."
-    echo "Visit: https://github.com/pyenv/pyenv-virtualenv#installation"
-    exit 1
-  fi
-  
-  # Detect Python version from system
-  PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))" 2>/dev/null || echo "3.10")
-  
-  # Check if Python version is available in pyenv (don't install, just check)
-  VENV_NAME="cva6"
-  if [[ -d "$HOME/.pyenv/versions/$VENV_NAME" ]]; then
-    echo "Using existing Python venv '$VENV_NAME'..."
+  if [[ "$PYTHON_OPTION" == "system" ]]; then
+    # Use system Python venv
+    VENV_PATH="$HOME/.pyenv/versions/cva6"
+    
+    if [[ -d "$VENV_PATH" ]]; then
+      echo "Using existing Python venv at $VENV_PATH..."
+    else
+      echo "Creating Python venv with system Python..."
+      mkdir -p "$HOME/.pyenv/versions"
+      python3 -m venv "$VENV_PATH"
+      echo "✓ Python venv created at $VENV_PATH"
+    fi
+    
+    # Activate
+    echo "Activating Python venv..."
+    export VIRTUAL_ENV="$VENV_PATH"
+    export PATH="$VIRTUAL_ENV/bin:$PATH"
+    echo "✓ Python virtual environment activated"
+    
   else
-    echo "ERROR: Python venv '$VENV_NAME' not found."
-    echo "Please create it first with: pyenv virtualenv $PYTHON_VERSION $VENV_NAME"
-    exit 1
+    # Use pyenv (original logic)
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    
+    # Check if pyenv is installed
+    if [[ ! -f "$PYENV_ROOT/bin/pyenv" ]]; then
+      echo "pyenv not found. Installing pyenv..."
+      sudo apt update
+      sudo apt install -y build-essential libssl-dev zlib1g-dev \
+        libbz2-dev libreadline-dev libsqlite3-dev wget \
+        llvm libncurses5-dev libncursesw5-dev \
+        tk-dev libffi-dev liblzma-dev
+      curl https://pyenv.run | bash
+      export PYENV_ROOT="$HOME/.pyenv"
+      export PATH="$PYENV_ROOT/bin:$PATH"
+      eval "$(pyenv init -)" 2>/dev/null || true
+      eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+      echo "✓ pyenv installed successfully"
+    fi
+    
+    eval "$(pyenv init -)" 2>/dev/null || true
+    eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+    
+    if ! pyenv virtualenvs >/dev/null 2>&1; then
+      echo "ERROR: pyenv-virtualenv plugin is not installed."
+      exit 1
+    fi
+    
+    PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))" 2>/dev/null || echo "3.10")
+    VENV_NAME="cva6"
+    
+    if [[ -d "$HOME/.pyenv/versions/$VENV_NAME" ]]; then
+      echo "Using existing Python venv '$VENV_NAME'..."
+    else
+      echo "Creating Python venv '$VENV_NAME' with Python $PYTHON_VERSION..."
+      if [[ ! -d "$HOME/.pyenv/versions/$PYTHON_VERSION" ]]; then
+        echo "Installing Python $PYTHON_VERSION in pyenv..."
+        pyenv install $PYTHON_VERSION
+        echo "✓ Python $PYTHON_VERSION installed"
+      else
+        echo "✓ Python $PYTHON_VERSION already installed in pyenv"
+      fi
+      pyenv virtualenv $PYTHON_VERSION $VENV_NAME
+      echo "✓ Python venv '$VENV_NAME' created"
+    fi
+    
+    export VIRTUAL_ENV="$HOME/.pyenv/versions/$VENV_NAME"
+    export PATH="$VIRTUAL_ENV/bin:$PATH"
+    echo "✓ Python virtual environment activated"
   fi
-  
-  # Activate the virtual environment for this session
-  echo "Activating Python venv '$VENV_NAME'..."
-  export VIRTUAL_ENV="$HOME/.pyenv/versions/$VENV_NAME"
-  export PATH="$VIRTUAL_ENV/bin:$PATH"
-  echo "✓ Python virtual environment activated"
 fi
 
 # ============================================================
@@ -228,6 +311,20 @@ fi
 cd "$CVA6_REPO"
 echo "Initializing git submodules..."
 git submodule update --init --recursive
+
+# ------------------------------------------------------------
+# Fix yaml-cpp compilation error (missing #include <cstdint>)
+# ------------------------------------------------------------
+YAML_CPP_FILE="$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim/yaml-cpp/src/emitterutils.cpp"
+if [[ -f "$YAML_CPP_FILE" ]]; then
+  if ! grep -q '#include <cstdint>' "$YAML_CPP_FILE"; then
+    echo "Fixing yaml-cpp compilation error (missing #include <cstdint>)..."
+    sed -i '12a #include <cstdint>' "$YAML_CPP_FILE"
+    echo "✓ yaml-cpp patch applied"
+  else
+    echo "✓ yaml-cpp already patched"
+  fi
+fi
 
 echo "Fetching toolchain sources..."
 bash util/toolchain-builder/get-toolchain.sh
@@ -239,6 +336,68 @@ git apply ../../gcc-cva6-tune.patch || echo "Patch already applied or not found"
 echo "Building toolchain..."
 cd "$CVA6_REPO/util/toolchain-builder"
 bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
+
+# ============================================================
+# Verify RISCV toolchain installation
+# ============================================================
+echo ""
+echo "Verifying RISCV toolchain installation..."
+
+# Check if RISCV toolchain was built successfully
+if [[ -f "$RISCV/bin/riscv-none-elf-gcc" ]]; then
+  echo "✓ RISCV toolchain found at $RISCV"
+  
+  # Verify basic compilation works
+  echo "Testing RISCV toolchain..."
+  TEST_FILE=$(mktemp)
+  echo "int main() { return 0; }" > "$TEST_FILE.c"
+  
+  if "$RISCV/bin/riscv-none-elf-gcc" -o "$TEST_FILE" "$TEST_FILE.c" 2>/dev/null; then
+    echo "✓ RISCV toolchain basic compilation test passed"
+    rm -f "$TEST_FILE" "$TEST_FILE.c"
+  else
+    echo "WARNING: RISCV toolchain compilation test failed"
+    rm -f "$TEST_FILE" "$TEST_FILE.c"
+    echo ""
+    echo "ERROR: RISCV toolchain may be incomplete or misconfigured."
+    echo "This is likely due to missing newlib headers or incorrect configuration."
+    echo "Please rebuild the toolchain or check the CVA6 repository for issues."
+    echo ""
+    echo "Common solutions:"
+    echo "  1. Re-run the toolchain builder"
+    echo "  2. Check if CONFIG_NAME matches your target (cv32a60x vs cv64a6_imafdc_sv39)"
+    echo "  3. Verify the gcc-cva6-tune.patch was applied correctly"
+  fi
+  
+  # Test if toolchain supports required extensions
+  echo ""
+  echo "Testing RISCV toolchain extension support..."
+  TEST_FILE=$(mktemp)
+  echo "int main() { return 0; }" > "$TEST_FILE.c"
+  
+  if "$RISCV/bin/riscv-none-elf-gcc" -march=rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei -mabi=ilp32 -o "$TEST_FILE" "$TEST_FILE.c" 2>/dev/null; then
+    echo "✓ RISCV toolchain supports rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei extensions"
+    TOOLCHAIN_EXTENSIONS_SUPPORTED=true
+  else
+    echo "WARNING: RISCV toolchain does NOT support rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei extensions"
+    echo ""
+    echo "This means the toolchain was built without these extensions."
+    echo "Simulations may fail with 'invalid -march= option' errors."
+    TOOLCHAIN_EXTENSIONS_SUPPORTED=false
+    
+    # Try basic RV32IMC
+    if "$RISCV/bin/riscv-none-elf-gcc" -march=rv32imc -mabi=ilp32 -o "$TEST_FILE" "$TEST_FILE.c" 2>/dev/null; then
+      echo ""
+      echo "Toolchain supports basic rv32imc. You can use this as a fallback."
+      echo "To enable basic mode, export ENABLE_BASIC_EXTENSIONS=1 before running simulations."
+      export ENABLE_BASIC_EXTENSIONS=1
+    fi
+  fi
+  rm -f "$TEST_FILE" "$TEST_FILE.c"
+else
+  echo "ERROR: RISCV toolchain not found at $RISCV"
+  echo "Toolchain build may have failed. Please check the build logs."
+fi
 
 # ============================================================
 # Python requirements
@@ -439,6 +598,14 @@ fi
 # Hello World simulation
 if ask_yes_no "Run hello_world simulation?"; then
   export DV_SIMULATORS=veri-testharness
+  
+  # Check if toolchain supports required extensions
+  MARCH_FLAGS="-march=rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei"
+  if [[ "${TOOLCHAIN_EXTENSIONS_SUPPORTED:-false}" == "false" ]]; then
+    echo "WARNING: Toolchain doesn't support extended extensions. Using basic rv32imc."
+    MARCH_FLAGS="-march=rv32imc"
+  fi
+  
   cd ./verif/sim
   python3 cva6.py --target cv32a60x --iss=$DV_SIMULATORS --iss_yaml=cva6.yaml \
     --c_tests ../tests/custom/hello_world/hello_world.c \
@@ -446,7 +613,7 @@ if ask_yes_no "Run hello_world simulation?"; then
     --gcc_opts="-static -mcmodel=medany -fvisibility=hidden -nostdlib \
     -nostartfiles -g ../tests/custom/common/syscalls.c \
     ../tests/custom/common/crt.S -lgcc \
-    -I../tests/custom/env -I../tests/custom/common"
+    -I../tests/custom/env -I../tests/custom/common $MARCH_FLAGS -mabi=ilp32"
   cd "$CVA6_REPO"
   echo "✓ hello_world simulation completed"
 fi
@@ -505,48 +672,37 @@ if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
 # ---- CVA6 Environment ----
 
 # Pyenv configuration for Python virtual environment
-export PATH="$HOME/.pyenv/bin:$PATH"
-export PATH="$HOME/.pyenv/shims:$PATH"
-eval "$(pyenv init -)"
-eval "$(pyenv virtualenv-init -)"
+if command -v pyenv >/dev/null 2>&1; then
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init -)"
+  eval "$(pyenv virtualenv-init -)"
+fi
 
-# CVA6 Environment Variables
-export RISCV="$RISCV"
-export INSTALL_DIR="$RISCV"
-export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+# To activate Python venv: pyenv activate cva6
+# Or use: source ~/.pyenv/versions/cva6/bin/activate
+
+export CVA6_REPO_DIR="$CVA6_REPO"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
 export SPIKE_ROOT="$SPIKE_INSTALL_DIR"
 export SPIKE_SRC_DIR="$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim"
 export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
-export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
-export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
-export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
-export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
-export DV_SIMULATORS=veri-testharness,spike
-export DV_TARGET=cv64a6_imafdc_sv39
-export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
+export RISCV="$RISCV"
+export INSTALL_DIR="$RISCV"
 
-# Add to PATH
-export PATH="$VERILATOR_INSTALL_DIR/bin:$PATH"
-export PATH="$SPIKE_INSTALL_DIR/bin:$PATH"
+# Set default variables to avoid unbound variable errors
+export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
+
+# Ensure RISCV toolchain path is first in PATH (before Xilinx tools)
 export PATH="$RISCV/bin:$PATH"
 
-# To activate Python venv: pyenv activate cva6
-
-EOF
-    echo "✓ CVA6 environment added to ~/.bashrc"
-  else
-    echo "✓ CVA6 environment already present in ~/.bashrc"
-  fi
-fi
-
-# Export minimal variables for current session (full config is in bashrc)
-export RISCV="$RISCV"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
+export CV_SW_PREFIX="\${CV_SW_PREFIX:-riscv-none-elf-}"
+export RISCV_CC="\${RISCV_CC:-$RISCV/bin/\${CV_SW_PREFIX}gcc}"
+export RISCV_OBJCOPY="\${RISCV_OBJCOPY:-$RISCV/bin/\${CV_SW_PREFIX}objcopy}"
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
+export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
 
 # Source CVA6 simulation environment (must be after LD_LIBRARY_PATH and CV_SW_PREFIX)
 if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
@@ -602,9 +758,11 @@ echo ""
 echo "Toolchain config : $CONFIG_NAME"
 echo "RISCV path       : $RISCV"
 echo ""
-echo "To activate Python venv:"
-echo "  pyenv activate cva6"
-echo ""
+if $USE_PYTHON; then
+  echo "To activate Python venv:"
+  echo "  pyenv activate cva6"
+  echo ""
+fi
 echo "To set environment for future sessions:"
 echo "  The environment is already configured in ~/.bashrc"
 echo ""
@@ -620,7 +778,7 @@ echo "  rm -rf $CVA6_REPO"
 echo "  rm -rf $RISCV"
 echo "  rm -rf $CVA6_REPO/tools/verilator-v5.008"
 echo "  rm -rf $CVA6_REPO/tools/spike"
-echo "  pyenv uninstall cva6"
+echo "  pyenv uninstall cva6 2>/dev/null || true"
+echo "  rm -rf ~/.pyenv/versions/cva6 2>/dev/null || true"
 echo "  # Remove CVA6 Environment block from ~/.bashrc"
 echo "======================================"
-
