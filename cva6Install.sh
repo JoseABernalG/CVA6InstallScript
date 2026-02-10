@@ -174,20 +174,52 @@ export CONFIG_NAME
 echo "Using config name: $CONFIG_NAME"
 
 # ============================================================
-# Python virtual environment
+# Python virtual environment (using pyenv)
 # ============================================================
 USE_PYTHON=false
-if ask_yes_no "Use Python virtual environment (ScamaCVA6)?"; then
+if ask_yes_no "Use Python virtual environment (cva6)?"; then
   USE_PYTHON=true
-  cd "$HOME"
-  if [[ ! -d ScamaCVA6 ]]; then
-    echo "Creating Python venv: ScamaCVA6"
-    python3 -m venv ScamaCVA6
+  
+  # Set up pyenv
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  
+  # Check if pyenv is installed
+  if [[ ! -f "$PYENV_ROOT/bin/pyenv" ]]; then
+    echo "ERROR: pyenv is not installed at $PYENV_ROOT"
+    echo "Visit: https://github.com/pyenv/pyenv#installation"
+    exit 1
   fi
-  source ScamaCVA6/bin/activate
-  pip install --upgrade pip
-  pip install rstcloth mako mdutils recommonmark
-  echo "✓ Python virtual environment ready"
+  
+  # Initialize pyenv
+  eval "$(pyenv init -)" 2>/dev/null || true
+  eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+  
+  # Verify pyenv virtualenv is available
+  if ! pyenv virtualenvs >/dev/null 2>&1; then
+    echo "ERROR: pyenv-virtualenv plugin is not installed."
+    echo "Visit: https://github.com/pyenv/pyenv-virtualenv#installation"
+    exit 1
+  fi
+  
+  # Detect Python version from system
+  PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))" 2>/dev/null || echo "3.10")
+  
+  # Check if Python version is available in pyenv (don't install, just check)
+  VENV_NAME="cva6"
+  if [[ -d "$HOME/.pyenv/versions/$VENV_NAME" ]]; then
+    echo "Using existing Python venv '$VENV_NAME'..."
+  else
+    echo "ERROR: Python venv '$VENV_NAME' not found."
+    echo "Please create it first with: pyenv virtualenv $PYTHON_VERSION $VENV_NAME"
+    exit 1
+  fi
+  
+  # Activate the virtual environment for this session
+  echo "Activating Python venv '$VENV_NAME'..."
+  export VIRTUAL_ENV="$HOME/.pyenv/versions/$VENV_NAME"
+  export PATH="$VIRTUAL_ENV/bin:$PATH"
+  echo "✓ Python virtual environment activated"
 fi
 
 # ============================================================
@@ -215,6 +247,7 @@ if $USE_PYTHON; then
   echo "Installing Python requirements..."
   pip install -r "$CVA6_REPO/verif/sim/dv/requirements.txt"
   pip install -r "$CVA6_REPO/docs/requirements.txt"
+  pip install rstcloth mako mdutils recommonmark
 fi
 
 
@@ -470,6 +503,18 @@ if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
     cat >> "$HOME/.bashrc" << EOF
 
 # ---- CVA6 Environment ----
+
+# Pyenv configuration for Python virtual environment
+if command -v pyenv >/dev/null 2>&1; then
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init -)"
+  eval "$(pyenv virtualenv-init -)"
+fi
+
+# To activate Python venv: pyenv activate cva6
+# Or use: source ~/.pyenv/versions/cva6/bin/activate
+
 export CVA6_REPO_DIR="$CVA6_REPO"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
@@ -526,7 +571,15 @@ EOF
   fi
 fi
 
-deactivate
+# ============================================================
+# Deactivate virtual environment
+# ============================================================
+if $USE_PYTHON; then
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    deactivate 2>/dev/null || true
+    unset VIRTUAL_ENV
+  fi
+fi
 
 # ============================================================
 # Final message
@@ -539,42 +592,24 @@ echo "Toolchain config : $CONFIG_NAME"
 echo "RISCV path       : $RISCV"
 echo ""
 echo "To activate Python venv:"
-echo "  source ~/ScamaCVA6/bin/activate"
+echo "  pyenv activate cva6"
 echo ""
 echo "To set environment for future sessions:"
-echo "  export LD_LIBRARY_PATH=\"\$LD_LIBRARY_PATH\""
-#include "$VERILATOR_INCLUDE:\$C_INCLUDE_PATH\""
-#include "$VERILATOR_INCLUDE:\$CPLUS_INCLUDE_PATH\""
+echo "  The environment is already configured in ~/.bashrc"
+echo ""
+echo "======================================"
+echo "UNINSTALL INSTRUCTIONS:"
+echo "======================================"
+echo ""
+echo "To uninstall CVA6, run:"
+echo "  bash $(dirname "$0")/cva6Uninstall.sh"
+echo ""
+echo "Or manually remove:"
+echo "  rm -rf $CVA6_REPO"
+echo "  rm -rf $RISCV"
+echo "  rm -rf $CVA6_REPO/tools/verilator-v5.008"
+echo "  rm -rf $CVA6_REPO/tools/spike"
+echo "  pyenv uninstall cva6"
+echo "  # Remove CVA6 Environment block from ~/.bashrc"
 echo "======================================"
 
-
-
-# Example commands to build docs:
-
-
-
-#exit 0
-#make -C 04_cv32a65x/design design-html
-
-#rm -Rf cva6 RISCV && mkdir RISCV
-#git clone https://github.com/openhwgroup/cva6.git
-#./CVA6InstallScript/cva6Install.sh
-
-
-
-
-# Example commands to build docs:
-
-
-
-#exit 0
-#make -C 04_cv32a65x/design design-html
-
-#rm -Rf cva6 RISCV && mkdir RISCV
-#git clone https://github.com/openhwgroup/cva6.git
-#./CVA6InstallScript/cva6Install.sh
-
-
-
-
-#TODO
