@@ -2,11 +2,15 @@
 set -euo pipefail
 
 # ============================================================
-# CVA6 Installation Script
+# Helpers
 # ============================================================
-# For known issues (especially on Kali Linux), see:
-# README_KNOWN_ISSUES.md
-# ============================================================
+log_step() {
+    echo ""
+    echo "=============================================="
+    echo "  $1"
+    echo "=============================================="
+}
+
 expand_path() {
   [[ "$1" == "~"* ]] && echo "${1/#\~/$HOME}" || echo "$1"
 }
@@ -100,7 +104,7 @@ echo "Using $NUM_JOBS build threads"
 # ============================================================
 # System dependencies (verified)
 # ============================================================
-echo ""
+log_step "Installing system dependencies"
 echo "Checking system dependencies..."
 
 require_packages \
@@ -479,38 +483,22 @@ fi
 # ============================================================
 # Install Verilator and Spike using CVA6 official scripts
 # ============================================================
+log_step "Installing Verilator and Spike"
 cd "$CVA6_REPO"
 
 # Install Verilator (uses v5.008 with required patch for CVA6)
 echo "Installing Verilator..."
 bash verif/regress/install-verilator.sh
 
-# Fix: Copy Verilator headers to include/ directory (install script doesn't do this correctly)
-echo "Fixing Verilator headers..."
-mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
-cp -r "$CVA6_REPO/tools/verilator-v5.008/build-v5.008/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
-cp -r "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
-echo "✓ Verilator headers fixed"
+# Create symlinks for Verilator auxiliary scripts (make install puts them in share/verilator/bin/)
+echo "Creating symlinks for Verilator auxiliary scripts..."
+ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_includer" "$VERILATOR_INSTALL_DIR/bin/verilator_includer"
+ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_ccache_report" "$VERILATOR_INSTALL_DIR/bin/verilator_ccache_report"
+ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_difftree" "$VERILATOR_INSTALL_DIR/bin/verilator_difftree"
+echo "✓ Verilator symlinks created"
 
-# Create symlink for DPI headers (Spike expects headers in include/vltstd/)
-if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; then
-  if [[ ! -d "$CVA6_REPO/tools/verilator-v5.008/include/vltstd" ]]; then
-    echo "Creating DPI headers directory..."
-    mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
-    echo "Creating symlink for DPI headers..."
-    ln -s "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" "$CVA6_REPO/tools/verilator-v5.008/include/vltstd"
-    echo "✓ DPI headers symlink created"
-  else
-    echo "✓ DPI headers already available"
-  fi
-  
-  # Also create symlink in CVA6 repo root for Spike build system
-  if [[ ! -d "$CVA6_REPO/include/vltstd" ]]; then
-    echo "Creating DPI headers symlink in CVA6 repo root..."
-    mkdir -p "$CVA6_REPO/include"
-    ln -sf /Tools/cva6/tools/verilator-v5.008/share/verilator/include/vltstd "$CVA6_REPO/include/vltstd"
-    echo "✓ DPI headers symlink in repo root created"
-  fi
+if [ ! -e "$VERILATOR_INSTALL_DIR/include" ]; then
+  ln -s "$VERILATOR_INSTALL_DIR/share/verilator/include" "$VERILATOR_INSTALL_DIR/include"
 fi
 
 # Set Verilator environment variables BEFORE installing Spike
@@ -597,7 +585,7 @@ fi
 
 # Hello World simulation
 if ask_yes_no "Run hello_world simulation?"; then
-  export DV_SIMULATORS=veri-testharness
+  export DV_SIMULATORS="veri-testharness"
   
   # Check if toolchain supports required extensions
   MARCH_FLAGS="-march=rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei"
@@ -620,7 +608,7 @@ fi
 
 # RISC-V Proxy Kernel simulation (for printf support)
 if ask_yes_no "Run veri-testharness-pk simulation?"; then
-  export DV_SIMULATORS=veri-testharness-pk
+  export DV_SIMULATORS="veri-testharness-pk"
   bash verif/regress/veri-testharness-pk-tests.sh
   echo "✓ veri-testharness-pk simulation completed"
 fi
@@ -633,14 +621,14 @@ fi
 
 # Regression tests
 if ask_yes_no "Run riscv-arch-test regression suite?"; then
-  export DV_SIMULATORS=veri-testharness,spike
+  export DV_SIMULATORS="veri-testharness,spike"
   bash verif/regress/dv-riscv-arch-test.sh
   echo "✓ riscv-arch-test regression completed"
 fi
 
 # Waveform generation
 if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
-  export DV_SIMULATORS=veri-testharness,spike
+  export DV_SIMULATORS="veri-testharness,spike"
   export TRACE_FAST=1
   echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
   echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
@@ -710,7 +698,7 @@ if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
 fi
 
 # Default simulation settings
-export DV_SIMULATORS=veri-testharness,spike
+export DV_SIMULATORS="veri-testharness,spike"
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
 

@@ -44,20 +44,55 @@ ask_yes_no() {
 echo "Enter the paths used during installation:"
 echo ""
 
-if [ -t 0 ]; then
-  read -e -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
-  read -e -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
-else
-  read -p "Enter CVA6 repo path (e.g., ~/cva6): " CVA6_REPO
-  read -p "Enter RISCV install path (e.g., ~/riscv): " RISCV
+# Try to detect paths from .bashrc if available
+DETECTED_CVA6=""
+DETECTED_RISCV=""
+DETECTED_VERILATOR=""
+DETECTED_SPIKE=""
+
+if [[ -f "$HOME/.bashrc" ]]; then
+  echo "Detecting paths from ~/.bashrc..."
+  DETECTED_CVA6=$(grep -oP 'export CVA6_REPO_DIR="\K[^"]+' "$HOME/.bashrc" 2>/dev/null || true)
+  DETECTED_RISCV=$(grep -oP 'export RISCV="\K[^"]+' "$HOME/.bashrc" 2>/dev/null || true)
+  DETECTED_VERILATOR=$(grep -oP 'export VERILATOR_INSTALL_DIR="\K[^"]+' "$HOME/.bashrc" 2>/dev/null || true)
+  DETECTED_SPIKE=$(grep -oP 'export SPIKE_INSTALL_DIR="\K[^"]+' "$HOME/.bashrc" 2>/dev/null || true)
+  
+  if [[ -n "$DETECTED_CVA6" ]] || [[ -n "$DETECTED_RISCV" ]]; then
+    echo "  ✓ Found CVA6_REPO: ${DETECTED_CVA6:-not set}"
+    echo "  ✓ Found RISCV: ${DETECTED_RISCV:-not set}"
+    echo "  ✓ Found VERILATOR: ${DETECTED_VERILATOR:-not set}"
+    echo "  ✓ Found SPIKE: ${DETECTED_SPIKE:-not set}"
+    echo ""
+  fi
 fi
+
+# Use detected paths as defaults, or ask user
+if [ -t 0 ]; then
+  read -e -p "Enter CVA6 repo path [${DETECTED_CVA6}]: " CVA6_REPO
+  read -e -p "Enter RISCV install path [${DETECTED_RISCV}]: " RISCV
+else
+  read -p "Enter CVA6 repo path [${DETECTED_CVA6}]: " CVA6_REPO
+  read -p "Enter RISCV install path [${DETECTED_RISCV}]: " RISCV
+fi
+
+# Use detected values as defaults if empty
+CVA6_REPO="${CVA6_REPO:-$DETECTED_CVA6}"
+RISCV="${RISCV:-$DETECTED_RISCV}"
+
+# Use detected Verilator/Spike paths, or derive from CVA6_REPO
+VERILATOR_PATH="${DETECTED_VERILATOR:-${CVA6_REPO}/tools/verilator-v5.008}"
+SPIKE_PATH="${DETECTED_SPIKE:-${CVA6_REPO}/tools/spike}"
 
 # Expand paths
 [[ "$CVA6_REPO" == "~"* ]] && CVA6_REPO="${CVA6_REPO/#\~/$HOME}"
 [[ "$RISCV" == "~"* ]] && RISCV="${RISCV/#\~/$HOME}"
+[[ "$VERILATOR_PATH" == "~"* ]] && VERILATOR_PATH="${VERILATOR_PATH/#\~/$HOME}"
+[[ "$SPIKE_PATH" == "~"* ]] && SPIKE_PATH="${SPIKE_PATH/#\~/$HOME}"
 
 CVA6_REPO=$(realpath "$CVA6_REPO" 2>/dev/null || echo "$CVA6_REPO")
 RISCV=$(realpath "$RISCV" 2>/dev/null || echo "$RISCV")
+VERILATOR_PATH=$(realpath "$VERILATOR_PATH" 2>/dev/null || echo "$VERILATOR_PATH")
+SPIKE_PATH=$(realpath "$SPIKE_PATH" 2>/dev/null || echo "$SPIKE_PATH")
 
 echo ""
 echo "Paths to remove:"
@@ -67,7 +102,6 @@ echo ""
 
 # ============================================================
 # Validate paths
-# ============================================================
 echo "Validating paths..."
 
 CVA6_EXISTS="[${RED}✗${NC}]"
@@ -77,6 +111,18 @@ VERILATOR_EXISTS="[${RED}✗${NC}]"
 
 if [[ -d "$CVA6_REPO" ]]; then
   CVA6_EXISTS="[${GREEN}✓${NC}]"
+fi
+
+if [[ -d "$RISCV" ]]; then
+  RISCV_EXISTS="[${GREEN}✓${NC}]"
+fi
+
+if [[ -d "$SPIKE_PATH" ]]; then
+  SPIKE_EXISTS="[${GREEN}✓${NC}]"
+fi
+
+if [[ -d "$VERILATOR_PATH" ]]; then
+  VERILATOR_EXISTS="[${GREEN}✓${NC}]"
 fi
 
 if [[ -d "$RISCV" ]]; then

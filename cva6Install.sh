@@ -4,6 +4,13 @@ set -euo pipefail
 # ============================================================
 # Helpers
 # ============================================================
+log_step() {
+    echo ""
+    echo "=============================================="
+    echo "  $1"
+    echo "=============================================="
+}
+
 expand_path() {
   [[ "$1" == "~"* ]] && echo "${1/#\~/$HOME}" || echo "$1"
 }
@@ -97,7 +104,7 @@ echo "Using $NUM_JOBS build threads"
 # ============================================================
 # System dependencies (verified)
 # ============================================================
-echo ""
+log_step "Installing system dependencies"
 echo "Checking system dependencies..."
 
 require_packages \
@@ -225,6 +232,7 @@ fi
 # ============================================================
 # Git + toolchain
 # ============================================================
+log_step "Building RISC-V toolchain (GCC)"
 cd "$CVA6_REPO"
 echo "Initializing git submodules..."
 git submodule update --init --recursive
@@ -244,7 +252,7 @@ bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
 # Python requirements
 # ============================================================
 if $USE_PYTHON; then
-  echo "Installing Python requirements..."
+  log_step "Installing Python requirements"
   pip install -r "$CVA6_REPO/verif/sim/dv/requirements.txt"
   pip install -r "$CVA6_REPO/docs/requirements.txt"
   pip install rstcloth mako mdutils recommonmark
@@ -295,6 +303,7 @@ fi
 # Docs build
 # ============================================================
 if ask_yes_no "Build documentation now?"; then
+  log_step "Building documentation"
   cd "$CVA6_REPO/docs"
   make
   echo "✓ Documentation built successfully"
@@ -304,6 +313,7 @@ fi
 # Configuration-specific manuals (optional)
 # ------------------------------------------------------------
 if ask_yes_no "Build configuration-specific manuals?"; then
+  log_step "Building configuration-specific manuals"
   cd "$CVA6_REPO/docs"
   
   # Instruction set manuals (privileged & unprivileged)
@@ -320,42 +330,26 @@ fi
 # ============================================================
 # Install Verilator and Spike using CVA6 official scripts
 # ============================================================
+log_step "Installing Verilator and Spike"
 cd "$CVA6_REPO"
 
 # Install Verilator (uses v5.008 with required patch for CVA6)
 echo "Installing Verilator..."
+export VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
 bash verif/regress/install-verilator.sh
 
-# Fix: Copy Verilator headers to include/ directory (install script doesn't do this correctly)
-echo "Fixing Verilator headers..."
-mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
-cp -r "$CVA6_REPO/tools/verilator-v5.008/build-v5.008/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
-cp -r "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
-echo "✓ Verilator headers fixed"
+# Create symlinks for Verilator auxiliary scripts (make install puts them in share/verilator/bin/)
+echo "Creating symlinks for Verilator auxiliary scripts..."
+ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_includer" "$VERILATOR_INSTALL_DIR/bin/verilator_includer"
+ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_ccache_report" "$VERILATOR_INSTALL_DIR/bin/verilator_ccache_report"
+ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_difftree" "$VERILATOR_INSTALL_DIR/bin/verilator_difftree"
+echo "✓ Verilator symlinks created"
 
-# Create symlink for DPI headers (Spike expects headers in include/vltstd/)
-if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; then
-  if [[ ! -d "$CVA6_REPO/tools/verilator-v5.008/include/vltstd" ]]; then
-    echo "Creating DPI headers directory..."
-    mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
-    echo "Creating symlink for DPI headers..."
-    ln -s "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" "$CVA6_REPO/tools/verilator-v5.008/include/vltstd"
-    echo "✓ DPI headers symlink created"
-  else
-    echo "✓ DPI headers already available"
-  fi
-  
-  # Also create symlink in CVA6 repo root for Spike build system
-  if [[ ! -d "$CVA6_REPO/include/vltstd" ]]; then
-    echo "Creating DPI headers symlink in CVA6 repo root..."
-    mkdir -p "$CVA6_REPO/include"
-    ln -sf /Tools/cva6/tools/verilator-v5.008/share/verilator/include/vltstd "$CVA6_REPO/include/vltstd"
-    echo "✓ DPI headers symlink in repo root created"
-  fi
+if [ ! -e "$VERILATOR_INSTALL_DIR/include" ]; then
+  ln -s "$VERILATOR_INSTALL_DIR/share/verilator/include" "$VERILATOR_INSTALL_DIR/include"
 fi
 
 # Set Verilator environment variables BEFORE installing Spike
-export VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 
 # Install Spike (uses vendorized version in CVA6 repo)
@@ -402,6 +396,7 @@ if ask_yes_no "Source setup-env.sh for simulations?"; then
 fi
 
 if ask_yes_no "Run smoke tests now?"; then
+  log_step "Running smoke tests"
   if $USE_PYTHON; then
 
     echo "Running smoke-gen_tests.sh..."
@@ -431,10 +426,7 @@ fi
 # ============================================================
 # Standalone Simulations (examples)
 # ============================================================
-echo ""
-echo "======================================"
-echo "Running Standalone Simulations"
-echo "======================================"
+log_step "Running standalone simulations"
 
 # Default verification environment variables
 DV_TARGET="cv64a6_imafdc_sv39"
@@ -454,7 +446,7 @@ fi
 
 # Hello World simulation
 if ask_yes_no "Run hello_world simulation?"; then
-  export DV_SIMULATORS=veri-testharness
+  export DV_SIMULATORS="veri-testharness"
   cd ./verif/sim
   python3 cva6.py --target cv32a60x --iss=$DV_SIMULATORS --iss_yaml=cva6.yaml \
     --c_tests ../tests/custom/hello_world/hello_world.c \
@@ -469,7 +461,7 @@ fi
 
 # RISC-V Proxy Kernel simulation (for printf support)
 if ask_yes_no "Run veri-testharness-pk simulation?"; then
-  export DV_SIMULATORS=veri-testharness-pk
+  export DV_SIMULATORS="veri-testharness-pk"
   bash verif/regress/veri-testharness-pk-tests.sh
   echo "✓ veri-testharness-pk simulation completed"
 fi
@@ -490,14 +482,14 @@ fi
 
 # Regression tests
 if ask_yes_no "Run riscv-arch-test regression suite?"; then
-  export DV_SIMULATORS=veri-testharness,spike
+  export DV_SIMULATORS="veri-testharness,spike"
   bash verif/regress/dv-riscv-arch-test.sh
   echo "✓ riscv-arch-test regression completed"
 fi
 
 # Waveform generation
 if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
-  export DV_SIMULATORS=veri-testharness,spike
+  export DV_SIMULATORS="veri-testharness,spike"
   export TRACE_FAST=1
   echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
   echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
@@ -535,6 +527,7 @@ eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
 
 # CVA6 Environment Variables
+export CVA6_REPO_DIR="$CVA6_REPO"
 export RISCV="$RISCV"
 export INSTALL_DIR="$RISCV"
 export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
@@ -549,7 +542,7 @@ export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
 export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
 export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
 export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
-export DV_SIMULATORS=veri-testharness,spike
+export DV_SIMULATORS="veri-testharness,spike"
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
 # TRACE_FAST is optional (uncomment to enable by default)
@@ -586,7 +579,7 @@ if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
 fi
 
 # Default simulation settings
-export DV_SIMULATORS=veri-testharness,spike
+export DV_SIMULATORS="veri-testharness,spike"
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
 
@@ -624,11 +617,20 @@ fi
 echo ""
 echo "======================================"
 echo "CVA6 installation completed successfully"
+echo "======================================"
 echo ""
-echo "Toolchain config : $CONFIG_NAME"
-echo "RISCV path       : $RISCV"
-echo "TRACE_FAST=1     : Optional (uncomment in bashrc to enable waveform generation)"
-echo "VERDI=1         : ${VERDI_ENABLED:-false} (VCS debugging)"
+echo "Installation paths:"
+echo "  CVA6_REPO     : $CVA6_REPO"
+echo "  RISCV         : $RISCV"
+echo "  Verilator     : $VERILATOR_INSTALL_DIR"
+echo "  Spike         : $SPIKE_INSTALL_DIR"
+echo ""
+echo "Toolchain config: $CONFIG_NAME"
+echo ""
+echo "DV_SIMULATORS  : veri-testharness,spike"
+echo "DV_TARGET      : cv64a6_imafdc_sv39"
+echo "TRACE_FAST=1   : Optional (uncomment in bashrc to enable waveform generation)"
+echo "VERDI=1        : ${VERDI_ENABLED:-false} (VCS debugging)"
 echo ""
 echo "NOTE: VERDI and TRACE_FAST are mutually exclusive!"
 echo "      If you enable both, simulations will fail."
@@ -639,13 +641,14 @@ echo ""
 echo "To enable waveforms for Verilator only:"
 echo "  export DV_SIMULATORS=veri-testharness"
 echo "  export TRACE_FAST=1"
-echo "  bash verif/regress/smoke-tests-<cpu_version>.sh"
+echo "  bash verif/regress/smoke-tests-cv64a6_imafdc_sv39.sh"
 echo ""
 echo "To activate Python venv:"
 echo "  pyenv activate cva6"
 echo ""
 echo "To set environment for future sessions:"
 echo "  The environment is already configured in ~/.bashrc"
+echo "  Run: source ~/.bashrc"
 echo ""
 echo "======================================"
 echo "UNINSTALL INSTRUCTIONS:"
@@ -654,12 +657,5 @@ echo ""
 echo "To uninstall CVA6, run:"
 echo "  bash $(dirname "$0")/cva6Uninstall.sh"
 echo ""
-echo "Or manually remove:"
-echo "  rm -rf $CVA6_REPO"
-echo "  rm -rf $RISCV"
-echo "  rm -rf $CVA6_REPO/tools/verilator-v5.008"
-echo "  rm -rf $CVA6_REPO/tools/spike"
-echo "  pyenv uninstall cva6"
-echo "  # Remove CVA6 Environment block from ~/.bashrc"
 echo "======================================"
 
