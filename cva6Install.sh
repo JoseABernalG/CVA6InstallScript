@@ -466,20 +466,6 @@ if ask_yes_no "Run veri-testharness-pk simulation?"; then
   echo "✓ veri-testharness-pk simulation completed"
 fi
 
-# VCS with Verdi
-if ask_yes_no "Enable Verdi for VCS simulations?"; then
-  if [[ "${TRACE_FAST:-}" == "1" ]]; then
-    echo "WARNING: VERDI and TRACE_FAST are mutually exclusive!"
-    echo "TRACE_FAST=1 is already enabled in bashrc."
-    echo "Verdi will not be enabled to avoid conflicts."
-    VERDI_ENABLED=false
-  else
-    export VERDI=1
-    echo "✓ VERDI=1 enabled (for VCS simulations)"
-    VERDI_ENABLED=true
-  fi
-fi
-
 # Regression tests
 if ask_yes_no "Run riscv-arch-test regression suite?"; then
   export DV_SIMULATORS="veri-testharness,spike"
@@ -487,19 +473,14 @@ if ask_yes_no "Run riscv-arch-test regression suite?"; then
   echo "✓ riscv-arch-test regression completed"
 fi
 
-# Waveform generation
-if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
-  export DV_SIMULATORS="veri-testharness,spike"
-  export TRACE_FAST=1
-  echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
-  echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
-fi
+# Waveform generation (optional - uncomment to enable)
+# export TRACE_FAST=1
+# echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
+# echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
 
-# Coverage and Verification Plan (VCS only)
-if ask_yes_no "Enable coverage for VCS simulations?"; then
-  export cov=1
-  echo "✓ Coverage enabled (cov=1)"
-fi
+# Coverage is disabled by default (VCS only)
+# Uncomment the following lines to enable coverage:
+# export cov=1
 
 # Log files info
 echo ""
@@ -521,8 +502,8 @@ if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
 # ---- CVA6 Environment ----
 
 # Pyenv configuration for Python virtual environment
-export PATH="$HOME/.pyenv/bin:$PATH"
-export PATH="$HOME/.pyenv/shims:$PATH"
+export PATH="~/.pyenv/bin:$PATH"
+export PATH="~/.pyenv/shims:$PATH"
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
 
@@ -545,22 +526,19 @@ export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
 export DV_SIMULATORS="veri-testharness,spike"
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
-# TRACE_FAST is optional (uncomment to enable by default)
-# export TRACE_FAST=1
+export TRACE_FAST=1
 
 # Add to PATH
 export PATH="$VERILATOR_INSTALL_DIR/bin:$PATH"
 export PATH="$SPIKE_INSTALL_DIR/bin:$PATH"
 export PATH="$RISCV/bin:$PATH"
 
+# Verdi is disabled by default (conflicts with TRACE_FAST)
+# Don't export VERDI=0 as it conflicts with TRACE_FAST in Makefile
+
 # To activate Python venv: pyenv activate cva6
 
 EOF
-
-# Add VERDI to bashrc if enabled (and not conflicting with TRACE_FAST)
-if [[ "${VERDI_ENABLED:-false}" == "true" ]]; then
-  echo "export VERDI=1" >> "$HOME/.bashrc"
-fi
 
     echo "✓ CVA6 environment added to ~/.bashrc"
   else
@@ -584,21 +562,21 @@ export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
 
 # Add Verilator to PATH
-case ":\$PATH:" in
-  *":\$VERILATOR_INSTALL_DIR/bin:"*) ;;
-  *) export PATH="\$VERILATOR_INSTALL_DIR/bin:\$PATH" ;;
+case ":$PATH:" in
+  *":$VERILATOR_INSTALL_DIR/bin:"*) ;;
+  *) export PATH="$VERILATOR_INSTALL_DIR/bin:$PATH" ;;
 esac
 
 # Add Spike to PATH
-case ":\$PATH:" in
-  *":\$SPIKE_INSTALL_DIR/bin:"*) ;;
-  *) export PATH="\$SPIKE_INSTALL_DIR/bin:\$PATH" ;;
+case ":$PATH:" in
+  *":$SPIKE_INSTALL_DIR/bin:"*) ;;
+  *) export PATH="$SPIKE_INSTALL_DIR/bin:$PATH" ;;
 esac
 
 # Add RISCV toolchain to PATH
-case ":\$PATH:" in
-  *":\$RISCV/bin:"*) ;;
-  *) export PATH="\$RISCV/bin:\$PATH" ;;
+case ":$PATH:" in
+  *":$RISCV/bin:"*) ;;
+  *) export PATH="$RISCV/bin:$PATH" ;;
 esac
 
 # ============================================================
@@ -629,19 +607,10 @@ echo "Toolchain config: $CONFIG_NAME"
 echo ""
 echo "DV_SIMULATORS  : veri-testharness,spike"
 echo "DV_TARGET      : cv64a6_imafdc_sv39"
-echo "TRACE_FAST=1   : Optional (uncomment in bashrc to enable waveform generation)"
-echo "VERDI=1        : ${VERDI_ENABLED:-false} (VCS debugging)"
 echo ""
-echo "NOTE: VERDI and TRACE_FAST are mutually exclusive!"
-echo "      If you enable both, simulations will fail."
-echo ""
-echo "Waveform generation (TRACE_FAST) can cause issues with Spike."
-echo "Enable only if you need waveforms (generates VCD/FST files)."
-echo ""
-echo "To enable waveforms for Verilator only:"
-echo "  export DV_SIMULATORS=veri-testharness"
-echo "  export TRACE_FAST=1"
-echo "  bash verif/regress/smoke-tests-cv64a6_imafdc_sv39.sh"
+echo "NOTE: TRACE_FAST and VERDI are mutually exclusive!"
+echo "      TRACE_FAST=1 is enabled in ~/.bashrc by default."
+echo "      To use VERDI instead, comment TRACE_FAST and uncomment VERDI in ~/.bashrc"
 echo ""
 echo "To activate Python venv:"
 echo "  pyenv activate cva6"

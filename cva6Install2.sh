@@ -613,12 +613,6 @@ if ask_yes_no "Run veri-testharness-pk simulation?"; then
   echo "✓ veri-testharness-pk simulation completed"
 fi
 
-# VCS with Verdi
-if ask_yes_no "Enable Verdi for VCS simulations?"; then
-  export VERDI=1
-  echo "✓ VERDI=1 enabled (for VCS simulations)"
-fi
-
 # Regression tests
 if ask_yes_no "Run riscv-arch-test regression suite?"; then
   export DV_SIMULATORS="veri-testharness,spike"
@@ -626,19 +620,14 @@ if ask_yes_no "Run riscv-arch-test regression suite?"; then
   echo "✓ riscv-arch-test regression completed"
 fi
 
-# Waveform generation
-if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
-  export DV_SIMULATORS="veri-testharness,spike"
-  export TRACE_FAST=1
-  echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
-  echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
-fi
+# Waveform generation (optional - uncomment to enable)
+# export TRACE_FAST=1
+# echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
+# echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
 
-# Coverage and Verification Plan (VCS only)
-if ask_yes_no "Enable coverage for VCS simulations?"; then
-  export cov=1
-  echo "✓ Coverage enabled (cov=1)"
-fi
+# Coverage is disabled by default (VCS only)
+# Uncomment the following lines to enable coverage:
+# export cov=1
 
 # Log files info
 echo ""
@@ -660,66 +649,44 @@ if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
 # ---- CVA6 Environment ----
 
 # Pyenv configuration for Python virtual environment
-if command -v pyenv >/dev/null 2>&1; then
-  export PYENV_ROOT="$HOME/.pyenv"
-  export PATH="$PYENV_ROOT/bin:$PATH"
-  eval "$(pyenv init -)"
-  eval "$(pyenv virtualenv-init -)"
-fi
+export PATH="~/.pyenv/bin:$PATH"
+export PATH="~/.pyenv/shims:$PATH"
+eval "$(pyenv init -)"
+eval "$(pyenv virtualenv-init -)"
 
 # To activate Python venv: pyenv activate cva6
-# Or use: source ~/.pyenv/versions/cva6/bin/activate
 
 export CVA6_REPO_DIR="$CVA6_REPO"
+export RISCV="$RISCV"
+export INSTALL_DIR="$RISCV"
+export CV_SW_PREFIX="\${CV_SW_PREFIX:-riscv-none-elf-}"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
 export SPIKE_ROOT="$SPIKE_INSTALL_DIR"
 export SPIKE_SRC_DIR="$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim"
 export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
-export RISCV="$RISCV"
-export INSTALL_DIR="$RISCV"
-
-# Set default variables to avoid unbound variable errors
 export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
-
-# Ensure RISCV toolchain path is first in PATH (before Xilinx tools)
-export PATH="$RISCV/bin:$PATH"
-
-export CV_SW_PREFIX="\${CV_SW_PREFIX:-riscv-none-elf-}"
 export RISCV_CC="\${RISCV_CC:-$RISCV/bin/\${CV_SW_PREFIX}gcc}"
 export RISCV_OBJCOPY="\${RISCV_OBJCOPY:-$RISCV/bin/\${CV_SW_PREFIX}objcopy}"
-export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
 export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
-
-# Source CVA6 simulation environment (must be after LD_LIBRARY_PATH and CV_SW_PREFIX)
-if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
-    source "$CVA6_REPO/verif/sim/setup-env.sh"
-fi
-
-# Default simulation settings
 export DV_SIMULATORS="veri-testharness,spike"
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
+export TRACE_FAST=1
 
-# Add Verilator to PATH
-case ":\$PATH:" in
-  *":\$VERILATOR_INSTALL_DIR/bin:"*) ;;
-  *) export PATH="\$VERILATOR_INSTALL_DIR/bin:\$PATH" ;;
-esac
+# Add to PATH
+export PATH="$VERILATOR_INSTALL_DIR/bin:$PATH"
+export PATH="$SPIKE_INSTALL_DIR/bin:$PATH"
+export PATH="$RISCV/bin:$PATH"
 
-# Add Spike to PATH
-case ":\$PATH:" in
-  *":\$SPIKE_INSTALL_DIR/bin:"*) ;;
-  *) export PATH="\$SPIKE_INSTALL_DIR/bin:\$PATH" ;;
-esac
+# Verdi is disabled by default (conflicts with TRACE_FAST in Makefile)
+# Don't export VERDI=0 as it conflicts with TRACE_FAST
 
-# Add RISCV toolchain to PATH
-case ":\$PATH:" in
-  *":\$RISCV/bin:"*) ;;
-  *) export PATH="\$RISCV/bin:\$PATH" ;;
-esac
+# To activate Python venv: pyenv activate cva6
+
 EOF
+
     echo "✓ CVA6 environment added to ~/.bashrc"
   else
     echo "✓ CVA6 environment already present in ~/.bashrc"
