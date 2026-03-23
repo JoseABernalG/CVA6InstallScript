@@ -181,7 +181,7 @@ export CONFIG_NAME
 echo "Using config name: $CONFIG_NAME"
 
 # ============================================================
-# Python virtual environment (using pyenv)
+# Python virtual environment (using pyenv or system venv)
 # ============================================================
 USE_PYTHON=false
 if ask_yes_no "Use Python virtual environment (cva6)?"; then
@@ -191,11 +191,29 @@ if ask_yes_no "Use Python virtual environment (cva6)?"; then
   export PYENV_ROOT="$HOME/.pyenv"
   export PATH="$PYENV_ROOT/bin:$PATH"
   
-  # Check if pyenv is installed
+  # Check if pyenv is installed, if not, install it
   if [[ ! -f "$PYENV_ROOT/bin/pyenv" ]]; then
-    echo "ERROR: pyenv is not installed at $PYENV_ROOT"
-    echo "Visit: https://github.com/pyenv/pyenv#installation"
-    exit 1
+    echo "pyenv not found. Installing pyenv..."
+    
+    # Install dependencies for pyenv
+    sudo apt update
+    sudo apt install -y build-essential libssl-dev zlib1g-dev \
+      libbz2-dev libreadline-dev libsqlite3-dev wget \
+      llvm libncurses5-dev libncursesw5-dev \
+      tk-dev libffi-dev liblzma-dev
+    
+    # Install pyenv
+    curl https://pyenv.run | bash
+    
+    # Re-export pyenv paths after installation
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    
+    # Initialize pyenv
+    eval "$(pyenv init -)" 2>/dev/null || true
+    eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+    
+    echo "✓ pyenv installed successfully"
   fi
   
   # Initialize pyenv
@@ -212,14 +230,25 @@ if ask_yes_no "Use Python virtual environment (cva6)?"; then
   # Detect Python version from system
   PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))" 2>/dev/null || echo "3.10")
   
-  # Check if Python version is available in pyenv (don't install, just check)
+  # Check if Python version is available in pyenv
   VENV_NAME="cva6"
   if [[ -d "$HOME/.pyenv/versions/$VENV_NAME" ]]; then
     echo "Using existing Python venv '$VENV_NAME'..."
   else
-    echo "ERROR: Python venv '$VENV_NAME' not found."
-    echo "Please create it first with: pyenv virtualenv $PYTHON_VERSION $VENV_NAME"
-    exit 1
+    echo "Creating Python venv '$VENV_NAME' with Python $PYTHON_VERSION..."
+    
+    # Check if Python version is already installed in pyenv
+    if [[ ! -d "$HOME/.pyenv/versions/$PYTHON_VERSION" ]]; then
+      echo "Installing Python $PYTHON_VERSION in pyenv..."
+      pyenv install $PYTHON_VERSION
+      echo "✓ Python $PYTHON_VERSION installed"
+    else
+      echo "✓ Python $PYTHON_VERSION already installed in pyenv"
+    fi
+    
+    # Create the virtual environment
+    pyenv virtualenv $PYTHON_VERSION $VENV_NAME
+    echo "✓ Python venv '$VENV_NAME' created"
   fi
   
   # Activate the virtual environment for this session
@@ -251,8 +280,9 @@ bash build-toolchain.sh "$CONFIG_NAME" "$INSTALL_DIR"
 # ============================================================
 # Python requirements
 # ============================================================
+log_step "Installing Python requirements"
 if $USE_PYTHON; then
-  log_step "Installing Python requirements"
+  echo "Installing Python requirements..."
   pip install -r "$CVA6_REPO/verif/sim/dv/requirements.txt"
   pip install -r "$CVA6_REPO/docs/requirements.txt"
   pip install rstcloth mako mdutils recommonmark
@@ -302,8 +332,8 @@ fi
 # ============================================================
 # Docs build
 # ============================================================
+log_step "Building documentation"
 if ask_yes_no "Build documentation now?"; then
-  log_step "Building documentation"
   cd "$CVA6_REPO/docs"
   make
   echo "✓ Documentation built successfully"
@@ -313,7 +343,6 @@ fi
 # Configuration-specific manuals (optional)
 # ------------------------------------------------------------
 if ask_yes_no "Build configuration-specific manuals?"; then
-  log_step "Building configuration-specific manuals"
   cd "$CVA6_REPO/docs"
   
   # Instruction set manuals (privileged & unprivileged)
@@ -335,21 +364,38 @@ cd "$CVA6_REPO"
 
 # Install Verilator (uses v5.008 with required patch for CVA6)
 echo "Installing Verilator..."
-export VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
 bash verif/regress/install-verilator.sh
 
-# Create symlinks for Verilator auxiliary scripts (make install puts them in share/verilator/bin/)
-echo "Creating symlinks for Verilator auxiliary scripts..."
-ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_includer" "$VERILATOR_INSTALL_DIR/bin/verilator_includer"
-ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_ccache_report" "$VERILATOR_INSTALL_DIR/bin/verilator_ccache_report"
-ln -sf "$VERILATOR_INSTALL_DIR/share/verilator/bin/verilator_difftree" "$VERILATOR_INSTALL_DIR/bin/verilator_difftree"
-echo "✓ Verilator symlinks created"
+# Fix: Copy Verilator headers to include/ directory (install script doesn't do this correctly)
+echo "Fixing Verilator headers..."
+mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
+cp -r "$CVA6_REPO/tools/verilator-v5.008/build-v5.008/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
+cp -r "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
+echo "✓ Verilator headers fixed"
 
-if [ ! -e "$VERILATOR_INSTALL_DIR/include" ]; then
-  ln -s "$VERILATOR_INSTALL_DIR/share/verilator/include" "$VERILATOR_INSTALL_DIR/include"
+# Create symlink for DPI headers (Spike expects headers in include/vltstd/)
+if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; then
+  if [[ ! -d "$CVA6_REPO/tools/verilator-v5.008/include/vltstd" ]]; then
+    echo "Creating DPI headers directory..."
+    mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
+    echo "Creating symlink for DPI headers..."
+    ln -s "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" "$CVA6_REPO/tools/verilator-v5.008/include/vltstd"
+    echo "✓ DPI headers symlink created"
+  else
+    echo "✓ DPI headers already available"
+  fi
+  
+  # Also create symlink in CVA6 repo root for Spike build system
+  if [[ ! -d "$CVA6_REPO/include/vltstd" ]]; then
+    echo "Creating DPI headers symlink in CVA6 repo root..."
+    mkdir -p "$CVA6_REPO/include"
+    ln -sf /Tools/cva6/tools/verilator-v5.008/share/verilator/include/vltstd "$CVA6_REPO/include/vltstd"
+    echo "✓ DPI headers symlink in repo root created"
+  fi
 fi
 
 # Set Verilator environment variables BEFORE installing Spike
+export VERILATOR_INSTALL_DIR="$CVA6_REPO/tools/verilator-v5.008"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 
 # Install Spike (uses vendorized version in CVA6 repo)
@@ -377,6 +423,8 @@ fi
 # ============================================================
 # Smoke tests
 # ============================================================
+log_step "Running smoke tests"
+
 # Source setup-env.sh BEFORE smoke tests to ensure environment is configured
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
@@ -396,28 +444,11 @@ if ask_yes_no "Source setup-env.sh for simulations?"; then
 fi
 
 if ask_yes_no "Run smoke tests now?"; then
-  log_step "Running smoke tests"
-  if $USE_PYTHON; then
+  $USE_PYTHON
 
-    echo "Running smoke-gen_tests.sh..."
-    cd "$CVA6_REPO"
-    bash verif/regress/smoke-gen_tests.sh
-    echo "✓ Smoke-gen_tests.sh completed"
-
-    echo ""
-    echo "Running individual core smoke tests..."
-
-    echo "Running smoke-tests-cv32a65x.sh..."
-    bash verif/regress/smoke-tests-cv32a65x.sh || echo "Warning: cv32a65x tests failed or not found"
-
-    echo "Running smoke-tests-cv32a6_imac_sv32.sh..."
-    bash verif/regress/smoke-tests-cv32a6_imac_sv32.sh || echo "Warning: cv32a6_imac_sv32 tests failed or not found"
-
-    echo "Running smoke-tests-cv64a6_imafdc_sv39.sh..."
-    bash verif/regress/smoke-tests-cv64a6_imafdc_sv39.sh || echo "Warning: cv64a6_imafdc_sv39 tests failed or not found"
-
-    echo "✓ Individual core smoke tests completed"
-  fi
+  echo "Running smoke tests..."
+  cd "$CVA6_REPO"
+  bash verif/regress/smoke-gen_tests.sh
   echo "✓ Smoke tests completed"
 else
   echo "Skipping smoke tests."
@@ -427,6 +458,10 @@ fi
 # Standalone Simulations (examples)
 # ============================================================
 log_step "Running standalone simulations"
+echo ""
+echo "======================================"
+echo "Running Standalone Simulations"
+echo "======================================"
 
 # Default verification environment variables
 DV_TARGET="cv64a6_imafdc_sv39"
@@ -446,7 +481,7 @@ fi
 
 # Hello World simulation
 if ask_yes_no "Run hello_world simulation?"; then
-  export DV_SIMULATORS="veri-testharness"
+  export DV_SIMULATORS=veri-testharness
   cd ./verif/sim
   python3 cva6.py --target cv32a60x --iss=$DV_SIMULATORS --iss_yaml=cva6.yaml \
     --c_tests ../tests/custom/hello_world/hello_world.c \
@@ -461,26 +496,37 @@ fi
 
 # RISC-V Proxy Kernel simulation (for printf support)
 if ask_yes_no "Run veri-testharness-pk simulation?"; then
-  export DV_SIMULATORS="veri-testharness-pk"
+  export DV_SIMULATORS=veri-testharness-pk
   bash verif/regress/veri-testharness-pk-tests.sh
   echo "✓ veri-testharness-pk simulation completed"
 fi
 
+# VCS with Verdi
+if ask_yes_no "Enable Verdi for VCS simulations?"; then
+  export VERDI=1
+  echo "✓ VERDI=1 enabled (for VCS simulations)"
+fi
+
 # Regression tests
 if ask_yes_no "Run riscv-arch-test regression suite?"; then
-  export DV_SIMULATORS="veri-testharness,spike"
+  export DV_SIMULATORS=veri-testharness,spike
   bash verif/regress/dv-riscv-arch-test.sh
   echo "✓ riscv-arch-test regression completed"
 fi
 
-# Waveform generation (optional - uncomment to enable)
-# export TRACE_FAST=1
-# echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
-# echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
+# Waveform generation
+if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
+  export DV_SIMULATORS=veri-testharness,spike
+  export TRACE_FAST=1
+  echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
+  echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
+fi
 
-# Coverage is disabled by default (VCS only)
-# Uncomment the following lines to enable coverage:
-# export cov=1
+# Coverage and Verification Plan (VCS only)
+if ask_yes_no "Enable coverage for VCS simulations?"; then
+  export cov=1
+  echo "✓ Coverage enabled (cov=1)"
+fi
 
 # Log files info
 echo ""
@@ -501,83 +547,58 @@ if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
 
 # ---- CVA6 Environment ----
 
-# Pyenv configuration for Python virtual environment
+#pyenv for chipwhisperer
 export PATH="~/.pyenv/bin:$PATH"
 export PATH="~/.pyenv/shims:$PATH"
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
 
-# CVA6 Environment Variables
+# To activate Python venv: pyenv activate cva6
+# Or use: source ~/.pyenv/versions/cva6/bin/activate
+
+# CVA6 paths (without PATH variable)
+# Note: setup-env.sh will set the remaining environment variables
 export CVA6_REPO_DIR="$CVA6_REPO"
-export RISCV="$RISCV"
-export INSTALL_DIR="$RISCV"
-export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
 export VERILATOR_INSTALL_DIR="$VERILATOR_INSTALL_DIR"
 export SPIKE_ROOT="$SPIKE_INSTALL_DIR"
 export SPIKE_SRC_DIR="$CVA6_REPO/verif/core-v-verif/vendor/riscv/riscv-isa-sim"
 export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
-export RISCV_CC="${RISCV_CC:-$RISCV/bin/${CV_SW_PREFIX}gcc}"
-export RISCV_OBJCOPY="${RISCV_OBJCOPY:-$RISCV/bin/${CV_SW_PREFIX}objcopy}"
-export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
-export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
-export DV_SIMULATORS="veri-testharness,spike"
-export DV_TARGET=cv64a6_imafdc_sv39
-export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
-export TRACE_FAST=1
+export RISCV="$RISCV"
+export INSTALL_DIR="$RISCV"
 
-# Add to PATH
-export PATH="$VERILATOR_INSTALL_DIR/bin:$PATH"
-export PATH="$SPIKE_INSTALL_DIR/bin:$PATH"
+# Set default variables to avoid unbound variable errors
+export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
+
+# Add tool paths to PATH (simplified) (before Xilinx tools)
 export PATH="$RISCV/bin:$PATH"
 
-# Verdi is disabled by default (conflicts with TRACE_FAST)
-# Don't export VERDI=0 as it conflicts with TRACE_FAST in Makefile
+export CV_SW_PREFIX="\${CV_SW_PREFIX:-riscv-none-elf-}"
+export RISCV_CC="\${RISCV_CC:-$RISCV/bin/\${CV_SW_PREFIX}gcc}"
+export RISCV_OBJCOPY="\${RISCV_OBJCOPY:-$RISCV/bin/\${CV_SW_PREFIX}objcopy}"
+export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
+export DPI_STD_PATH="$VERILATOR_INSTALL_DIR/include/vltstd"
+export DPI_INCLUDE_PATH="$VERILATOR_INSTALL_DIR/include"
 
-# To activate Python venv: pyenv activate cva6
+# Source CVA6 simulation environment (must be after LD_LIBRARY_PATH and CV_SW_PREFIX)
+if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
+    source "$CVA6_REPO/verif/sim/setup-env.sh"
+fi
+
+# Add all tool paths to PATH
+export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:$PATH"
+
+# Default simulation settings
+export DV_SIMULATORS=veri-testharness,spike
+export DV_TARGET=cv64a6_imafdc_sv39
+export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
 
 EOF
-
     echo "✓ CVA6 environment added to ~/.bashrc"
   else
     echo "✓ CVA6 environment already present in ~/.bashrc"
   fi
 fi
-
-# Export minimal variables for current session
-export RISCV="$RISCV"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-export CV_SW_PREFIX="${CV_SW_PREFIX:-riscv-none-elf-}"
-
-# Source CVA6 simulation environment
-if [ -f "$CVA6_REPO/verif/sim/setup-env.sh" ]; then
-    source "$CVA6_REPO/verif/sim/setup-env.sh"
-fi
-
-# Default simulation settings
-export DV_SIMULATORS="veri-testharness,spike"
-export DV_TARGET=cv64a6_imafdc_sv39
-export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
-
-# Add Verilator to PATH
-case ":$PATH:" in
-  *":$VERILATOR_INSTALL_DIR/bin:"*) ;;
-  *) export PATH="$VERILATOR_INSTALL_DIR/bin:$PATH" ;;
-esac
-
-# Add Spike to PATH
-case ":$PATH:" in
-  *":$SPIKE_INSTALL_DIR/bin:"*) ;;
-  *) export PATH="$SPIKE_INSTALL_DIR/bin:$PATH" ;;
-esac
-
-# Add RISCV toolchain to PATH
-case ":$PATH:" in
-  *":$RISCV/bin:"*) ;;
-  *) export PATH="$RISCV/bin:$PATH" ;;
-esac
 
 # ============================================================
 # Deactivate virtual environment
@@ -595,29 +616,17 @@ fi
 echo ""
 echo "======================================"
 echo "CVA6 installation completed successfully"
-echo "======================================"
 echo ""
-echo "Installation paths:"
-echo "  CVA6_REPO     : $CVA6_REPO"
-echo "  RISCV         : $RISCV"
-echo "  Verilator     : $VERILATOR_INSTALL_DIR"
-echo "  Spike         : $SPIKE_INSTALL_DIR"
+echo "Toolchain config : $CONFIG_NAME"
+echo "RISCV path       : $RISCV"
 echo ""
-echo "Toolchain config: $CONFIG_NAME"
-echo ""
-echo "DV_SIMULATORS  : veri-testharness,spike"
-echo "DV_TARGET      : cv64a6_imafdc_sv39"
-echo ""
-echo "NOTE: TRACE_FAST and VERDI are mutually exclusive!"
-echo "      TRACE_FAST=1 is enabled in ~/.bashrc by default."
-echo "      To use VERDI instead, comment TRACE_FAST and uncomment VERDI in ~/.bashrc"
-echo ""
-echo "To activate Python venv:"
-echo "  pyenv activate cva6"
-echo ""
+if $USE_PYTHON; then
+  echo "To activate Python venv:"
+  echo "  pyenv activate cva6"
+  echo ""
+fi
 echo "To set environment for future sessions:"
 echo "  The environment is already configured in ~/.bashrc"
-echo "  Run: source ~/.bashrc"
 echo ""
 echo "======================================"
 echo "UNINSTALL INSTRUCTIONS:"
@@ -626,5 +635,12 @@ echo ""
 echo "To uninstall CVA6, run:"
 echo "  bash $(dirname "$0")/cva6Uninstall.sh"
 echo ""
+echo "Or manually remove:"
+echo "  rm -rf $CVA6_REPO"
+echo "  rm -rf $RISCV"
+echo "  rm -rf $CVA6_REPO/tools/verilator-v5.008"
+echo "  rm -rf $CVA6_REPO/tools/spike"
+echo "  pyenv uninstall cva6 2>/dev/null || true"
+echo "  rm -rf ~/.pyenv/versions/cva6 2>/dev/null || true"
+echo "  # Remove CVA6 Environment block from ~/.bashrc"
 echo "======================================"
-
