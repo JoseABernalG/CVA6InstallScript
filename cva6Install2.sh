@@ -9,9 +9,9 @@ set -euo pipefail
 # ============================================================
 log_step() {
     echo ""
-    echo "=============================================="
-    echo "  $1"
-    echo "=============================================="
+    echo -e "\033[36m==============================================\033[0m"
+    echo -e "\033[36m  $1\033[0m"
+    echo -e "\033[36m==============================================\033[0m"
 }
 
 expand_path() {
@@ -53,7 +53,7 @@ require_packages() {
     sudo apt update
     sudo apt install -y "${missing[@]}"
   else
-    echo "✓ All required system packages are already installed"
+    echo -e "\033[32m✓ All required system packages are already installed\033[0m"
   fi
 }
 
@@ -129,7 +129,7 @@ echo "Installing additional dependencies (may vary by distribution)..."
 # Try libgdk-pixbuf2.0-dev first, fall back to libgdk-pixbuf-xlib-2.0-dev
 if ! dpkg -s libgdk-pixbuf2.0-dev >/dev/null 2>&1; then
   if dpkg -s libgdk-pixbuf-xlib-2.0-dev >/dev/null 2>&1; then
-    echo "✓ Using libgdk-pixbuf-xlib-2.0-dev (replaces libgdk-pixbuf2.0-dev)"
+    echo -e "\033[32m✓ Using libgdk-pixbuf-xlib-2.0-dev (replaces libgdk-pixbuf2.0-dev)\033[0m"
   else
     echo "Installing libgdk-pixbuf2.0-dev (or replacement)..."
     sudo apt install -y libgdk-pixbuf2.0-dev libgdk-pixbuf-xlib-2.0-dev 2>/dev/null || \
@@ -151,14 +151,14 @@ if ! command -v bytefield-svg >/dev/null 2>&1; then
   echo "Installing bytefield-svg..."
   sudo npm install -g bytefield-svg
 else
-  echo "✓ bytefield-svg is already installed"
+  echo -e "\033[32m✓ bytefield-svg is already installed\033[0m"
 fi
 
 if ! command -v wavedrom-cli >/dev/null 2>&1; then
   echo "Installing wavedrom-cli..."
   sudo npm install -g wavedrom-cli
 else
-  echo "✓ wavedrom-cli is already installed"
+  echo -e "\033[32m✓ wavedrom-cli is already installed\033[0m"
 fi
 
 # ============================================================
@@ -178,7 +178,7 @@ if ask_yes_no "Install documentation tools (Ruby + Asciidoctor)?"; then
   # Install asciidoctor-mathematical separately (may have issues on some distros)
   echo "Installing asciidoctor-mathematical (may fail on some systems)..."
   sudo gem install asciidoctor-mathematical || echo "WARNING: asciidoctor-mathematical installation failed."
-  echo "✓ Ruby gems installed"
+  echo -e "\033[32m✓ Ruby gems installed\033[0m"
 fi
 
 # ============================================================
@@ -211,105 +211,26 @@ export CONFIG_NAME
 echo "Using config name: $CONFIG_NAME"
 
 # ============================================================
-# Python virtual environment (using pyenv OR system Python)
+# Python virtual environment setup (automatic)
 # ============================================================
 USE_PYTHON=false
-PYTHON_OPTION=""
-if ask_yes_no "Use Python virtual environment?"; then
+VENV_PATH="$HOME/.pyenv/versions/cva6"
+
+if [[ -d "$VENV_PATH" ]]; then
+  echo "Using existing Python venv at $VENV_PATH..."
   USE_PYTHON=true
-  
-  echo ""
-  echo "Choose Python installation method:"
-  echo "  1) Use system Python (python3-venv) - Recommended for clean installations"
-  echo "  2) Use pyenv (installs Python automatically) - More control"
-  
-  while true; do
-    read -p "Choose option (1/2) [default: 1]: " PYTHON_OPTION
-    case "$PYTHON_OPTION" in
-      1|"") 
-        PYTHON_OPTION="system"
-        break
-        ;;
-      2)
-        PYTHON_OPTION="pyenv"
-        break
-        ;;
-      *)
-        echo "  Please enter '1' or '2'."
-        ;;
-    esac
-  done
-  
-  if [[ "$PYTHON_OPTION" == "system" ]]; then
-    # Use system Python venv
-    VENV_PATH="$HOME/.pyenv/versions/cva6"
-    
-    if [[ -d "$VENV_PATH" ]]; then
-      echo "Using existing Python venv at $VENV_PATH..."
-    else
-      echo "Creating Python venv with system Python..."
-      mkdir -p "$HOME/.pyenv/versions"
-      python3 -m venv "$VENV_PATH"
-      echo "✓ Python venv created at $VENV_PATH"
-    fi
-    
-    # Activate
-    echo "Activating Python venv..."
-    export VIRTUAL_ENV="$VENV_PATH"
-    export PATH="$VIRTUAL_ENV/bin:$PATH"
-    echo "✓ Python virtual environment activated"
-    
-  else
-    # Use pyenv (original logic)
-    export PYENV_ROOT="$HOME/.pyenv"
-    export PATH="$PYENV_ROOT/bin:$PATH"
-    
-    # Check if pyenv is installed
-    if [[ ! -f "$PYENV_ROOT/bin/pyenv" ]]; then
-      echo "pyenv not found. Installing pyenv..."
-      sudo apt update
-      sudo apt install -y build-essential libssl-dev zlib1g-dev \
-        libbz2-dev libreadline-dev libsqlite3-dev wget \
-        llvm libncurses5-dev libncursesw5-dev \
-        tk-dev libffi-dev liblzma-dev
-      curl https://pyenv.run | bash
-      export PYENV_ROOT="$HOME/.pyenv"
-      export PATH="$PYENV_ROOT/bin:$PATH"
-      eval "$(pyenv init -)" 2>/dev/null || true
-      eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
-      echo "✓ pyenv installed successfully"
-    fi
-    
-    eval "$(pyenv init -)" 2>/dev/null || true
-    eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
-    
-    if ! pyenv virtualenvs >/dev/null 2>&1; then
-      echo "ERROR: pyenv-virtualenv plugin is not installed."
-      exit 1
-    fi
-    
-    PYTHON_VERSION=$(python3 -c "import sys; print('.'.join(map(str, sys.version_info[:2])))" 2>/dev/null || echo "3.10")
-    VENV_NAME="cva6"
-    
-    if [[ -d "$HOME/.pyenv/versions/$VENV_NAME" ]]; then
-      echo "Using existing Python venv '$VENV_NAME'..."
-    else
-      echo "Creating Python venv '$VENV_NAME' with Python $PYTHON_VERSION..."
-      if [[ ! -d "$HOME/.pyenv/versions/$PYTHON_VERSION" ]]; then
-        echo "Installing Python $PYTHON_VERSION in pyenv..."
-        pyenv install $PYTHON_VERSION
-        echo "✓ Python $PYTHON_VERSION installed"
-      else
-        echo "✓ Python $PYTHON_VERSION already installed in pyenv"
-      fi
-      pyenv virtualenv $PYTHON_VERSION $VENV_NAME
-      echo "✓ Python venv '$VENV_NAME' created"
-    fi
-    
-    export VIRTUAL_ENV="$HOME/.pyenv/versions/$VENV_NAME"
-    export PATH="$VIRTUAL_ENV/bin:$PATH"
-    echo "✓ Python virtual environment activated"
-  fi
+elif command -v python3 &> /dev/null; then
+  echo "Creating Python venv at $VENV_PATH..."
+  mkdir -p "$HOME/.pyenv/versions"
+  python3 -m venv "$VENV_PATH"
+  USE_PYTHON=true
+fi
+
+if $USE_PYTHON; then
+  echo "Activating Python venv..."
+  export VIRTUAL_ENV="$VENV_PATH"
+  export PATH="$VIRTUAL_ENV/bin:$PATH"
+  echo -e "\033[32m✓ Python virtual environment activated\033[0m"
 fi
 
 # ============================================================
@@ -328,9 +249,9 @@ if [[ -f "$YAML_CPP_FILE" ]]; then
   if ! grep -q '#include <cstdint>' "$YAML_CPP_FILE"; then
     echo "Fixing yaml-cpp compilation error (missing #include <cstdint>)..."
     sed -i '12a #include <cstdint>' "$YAML_CPP_FILE"
-    echo "✓ yaml-cpp patch applied"
+    echo -e "\033[32m✓ yaml-cpp patch applied\033[0m"
   else
-    echo "✓ yaml-cpp already patched"
+    echo -e "\033[32m✓ yaml-cpp already patched\033[0m"
   fi
 fi
 
@@ -353,7 +274,7 @@ echo "Verifying RISCV toolchain installation..."
 
 # Check if RISCV toolchain was built successfully
 if [[ -f "$RISCV/bin/riscv-none-elf-gcc" ]]; then
-  echo "✓ RISCV toolchain found at $RISCV"
+  echo -e "\033[32m✓ RISCV toolchain found at $RISCV\033[0m"
   
   # Verify basic compilation works
   echo "Testing RISCV toolchain..."
@@ -361,7 +282,7 @@ if [[ -f "$RISCV/bin/riscv-none-elf-gcc" ]]; then
   echo "int main() { return 0; }" > "$TEST_FILE.c"
   
   if "$RISCV/bin/riscv-none-elf-gcc" -o "$TEST_FILE" "$TEST_FILE.c" 2>/dev/null; then
-    echo "✓ RISCV toolchain basic compilation test passed"
+    echo -e "\033[32m✓ RISCV toolchain basic compilation test passed\033[0m"
     rm -f "$TEST_FILE" "$TEST_FILE.c"
   else
     echo "WARNING: RISCV toolchain compilation test failed"
@@ -384,7 +305,7 @@ if [[ -f "$RISCV/bin/riscv-none-elf-gcc" ]]; then
   echo "int main() { return 0; }" > "$TEST_FILE.c"
   
   if "$RISCV/bin/riscv-none-elf-gcc" -march=rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei -mabi=ilp32 -o "$TEST_FILE" "$TEST_FILE.c" 2>/dev/null; then
-    echo "✓ RISCV toolchain supports rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei extensions"
+    echo -e "\033[32m✓ RISCV toolchain supports rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei extensions\033[0m"
     TOOLCHAIN_EXTENSIONS_SUPPORTED=true
   else
     echo "WARNING: RISCV toolchain does NOT support rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei extensions"
@@ -466,7 +387,7 @@ log_step "Building documentation"
 if ask_yes_no "Build documentation now?"; then
   cd "$CVA6_REPO/docs"
   make
-  echo "✓ Documentation built successfully"
+  echo -e "\033[32m✓ Documentation built successfully\033[0m"
 fi
 
 # ------------------------------------------------------------
@@ -483,7 +404,7 @@ if ask_yes_no "Build configuration-specific manuals?"; then
   echo "Building design documentation..."
   make -C 04_cv32a65x/design design-html 2>/dev/null || echo "Warning: Could not build design docs"
   
-  echo "✓ Configuration-specific manuals built"
+  echo -e "\033[32m✓ Configuration-specific manuals built\033[0m"
 fi
 
 # ============================================================
@@ -501,7 +422,7 @@ echo "Fixing Verilator headers..."
 mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
 cp -r "$CVA6_REPO/tools/verilator-v5.008/build-v5.008/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
 cp -r "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/"* "$CVA6_REPO/tools/verilator-v5.008/include/" 2>/dev/null || true
-echo "✓ Verilator headers fixed"
+echo -e "\033[32m✓ Verilator headers fixed\033[0m"
 
 # Create symlink for DPI headers (Spike expects headers in include/vltstd/)
 if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; then
@@ -510,9 +431,9 @@ if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; 
     mkdir -p "$CVA6_REPO/tools/verilator-v5.008/include"
     echo "Creating symlink for DPI headers..."
     ln -s "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" "$CVA6_REPO/tools/verilator-v5.008/include/vltstd"
-    echo "✓ DPI headers symlink created"
+    echo -e "\033[32m✓ DPI headers symlink created\033[0m"
   else
-    echo "✓ DPI headers already available"
+    echo -e "\033[32m✓ DPI headers already available\033[0m"
   fi
   
   # Also create symlink in CVA6 repo root for Spike build system
@@ -520,7 +441,7 @@ if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; 
     echo "Creating DPI headers symlink in CVA6 repo root..."
     mkdir -p "$CVA6_REPO/include"
     ln -sf /Tools/cva6/tools/verilator-v5.008/share/verilator/include/vltstd "$CVA6_REPO/include/vltstd"
-    echo "✓ DPI headers symlink in repo root created"
+    echo -e "\033[32m✓ DPI headers symlink in repo root created\033[0m"
   fi
 fi
 
@@ -538,14 +459,14 @@ SPIKE_INSTALL_DIR="$CVA6_REPO/tools/spike"
 # Verify installations
 if [[ -f "$VERILATOR_INSTALL_DIR/bin/verilator" ]]; then
   VERILATOR_VERSION=$("$VERILATOR_INSTALL_DIR/bin/verilator" --version 2>&1 || echo "unknown")
-  echo "✓ Verilator installed: $VERILATOR_VERSION"
+  echo -e "\033[32m✓ Verilator installed: $VERILATOR_VERSION\033[0m"
 else
   echo "WARNING: Verilator installation may have failed"
 fi
 
 if [[ -f "$SPIKE_INSTALL_DIR/bin/spike" ]]; then
   SPIKE_VERSION=$("$SPIKE_INSTALL_DIR/bin/spike" --version 2>&1 || echo "unknown")
-  echo "✓ Spike installed: $SPIKE_VERSION"
+  echo -e "\033[32m✓ Spike installed: $SPIKE_VERSION\033[0m"
 else
   echo "WARNING: Spike installation may have failed"
 fi
@@ -570,7 +491,7 @@ export SPIKE_INSTALL_DIR="$SPIKE_INSTALL_DIR"
 # Source setup-env.sh for simulations
 if ask_yes_no "Source setup-env.sh for simulations?"; then
   source verif/sim/setup-env.sh
-  echo "✓ setup-env.sh sourced"
+  echo -e "\033[32m✓ setup-env.sh sourced\033[0m"
 fi
 
 if ask_yes_no "Run smoke tests now?"; then
@@ -579,7 +500,7 @@ if ask_yes_no "Run smoke tests now?"; then
   echo "Running smoke tests..."
   cd "$CVA6_REPO"
   bash verif/regress/smoke-gen_tests.sh
-  echo "✓ Smoke tests completed"
+  echo -e "\033[32m✓ Smoke tests completed\033[0m"
 else
   echo "Skipping smoke tests."
 fi
@@ -630,41 +551,41 @@ if ask_yes_no "Run hello_world simulation?"; then
     ../tests/custom/common/crt.S -lgcc \
     -I../tests/custom/env -I../tests/custom/common $MARCH_FLAGS -mabi=ilp32"
   cd "$CVA6_REPO"
-  echo "✓ hello_world simulation completed"
+  echo -e "\033[32m✓ hello_world simulation completed\033[0m"
 fi
 
 # RISC-V Proxy Kernel simulation (for printf support)
 if ask_yes_no "Run veri-testharness-pk simulation?"; then
   export DV_SIMULATORS=veri-testharness-pk
   bash verif/regress/veri-testharness-pk-tests.sh
-  echo "✓ veri-testharness-pk simulation completed"
+  echo -e "\033[32m✓ veri-testharness-pk simulation completed\033[0m"
 fi
 
 # VCS with Verdi
 if ask_yes_no "Enable Verdi for VCS simulations?"; then
   export VERDI=1
-  echo "✓ VERDI=1 enabled (for VCS simulations)"
+  echo -e "\033[32m✓ VERDI=1 enabled (for VCS simulations)\033[0m"
 fi
 
 # Regression tests
 if ask_yes_no "Run riscv-arch-test regression suite?"; then
   export DV_SIMULATORS=veri-testharness,spike
   bash verif/regress/dv-riscv-arch-test.sh
-  echo "✓ riscv-arch-test regression completed"
+  echo -e "\033[32m✓ riscv-arch-test regression completed\033[0m"
 fi
 
 # Waveform generation
 if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
   export DV_SIMULATORS=veri-testharness,spike
   export TRACE_FAST=1
-  echo "✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)"
+  echo -e "\033[32m✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)\033[0m"
   echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
 fi
 
 # Coverage and Verification Plan (VCS only)
 if ask_yes_no "Enable coverage for VCS simulations?"; then
   export cov=1
-  echo "✓ Coverage enabled (cov=1)"
+  echo -e "\033[32m✓ Coverage enabled (cov=1)\033[0m"
 fi
 
 # Log files info
@@ -686,14 +607,9 @@ if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
 
 # ---- CVA6 Environment ----
 
-#pyenv for chipwhisperer
-export PATH="~/.pyenv/bin:$PATH"
-export PATH="~/.pyenv/shims:$PATH"
-eval "$(pyenv init -)"
-eval "$(pyenv virtualenv-init -)"
-
-# To activate Python venv: pyenv activate cva6
-# Or use: source ~/.pyenv/versions/cva6/bin/activate
+# Note: Python venv activation must be done manually or via the install script
+# To activate: source ~/.pyenv/versions/cva6/bin/activate
+# Or add: source ~/.pyenv/versions/cva6/bin/activate >> ~/.bashrc
 
 export CVA6_REPO_DIR="$CVA6_REPO"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
@@ -716,9 +632,9 @@ export DV_SIMULATORS=veri-testharness,spike
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-$DV_TARGET-v.yaml"
 EOF
-    echo "✓ CVA6 environment added to ~/.bashrc"
+    echo -e "\033[32m✓ CVA6 environment added to ~/.bashrc\033[0m"
   else
-    echo "✓ CVA6 environment already present in ~/.bashrc"
+    echo -e "\033[32m✓ CVA6 environment already present in ~/.bashrc\033[0m"
   fi
 fi
 

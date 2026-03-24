@@ -283,8 +283,13 @@ fi
 if $REMOVE_BASHRC; then
   echo "Removing CVA6 Environment from ~/.bashrc..."
   if grep -q "# ---- CVA6 Environment ----" "$HOME/.bashrc"; then
-    # Remove the CVA6 Environment block
-    sed -i '/# ---- CVA6 Environment ----/,/^$/d' "$HOME/.bashrc"
+    # Create a temporary file and filter out the CVA6 block
+    # The block starts with "# ---- CVA6 Environment ----" and ends with "EOF"
+    awk 'BEGIN{skip=0} 
+         /# ---- CVA6 Environment ----/{skip=1; next} 
+         skip==1 && /^EOF$/{skip=0; next} 
+         skip==1{next} 
+         {print}' "$HOME/.bashrc" > "$HOME/.bashrc.tmp" && mv "$HOME/.bashrc.tmp" "$HOME/.bashrc"
     echo "  ${GREEN}✓${NC} CVA6 Environment removed from ~/.bashrc"
     echo ""
     echo "  ${YELLOW}Note:${NC} Run 'source ~/.bashrc' or open a new terminal"
