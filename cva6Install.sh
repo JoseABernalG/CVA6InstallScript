@@ -440,9 +440,22 @@ if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" ]]; 
   if [[ ! -d "$CVA6_REPO/include/vltstd" ]]; then
     echo "Creating DPI headers symlink in CVA6 repo root..."
     mkdir -p "$CVA6_REPO/include"
-    ln -sf /Tools/cva6/tools/verilator-v5.008/share/verilator/include/vltstd "$CVA6_REPO/include/vltstd"
+    ln -sf "$CVA6_REPO/tools/verilator-v5.008/share/verilator/include/vltstd" "$CVA6_REPO/include/vltstd"
     echo -e "\033[32m✓ DPI headers symlink in repo root created\033[0m"
   fi
+fi
+
+# Create symlinks for missing scripts in bin/ (verilator_includer, etc.)
+if [[ -d "$CVA6_REPO/tools/verilator-v5.008/share/verilator/bin" ]]; then
+  echo "Creating symlinks for Verilator bin scripts..."
+  for script in "$CVA6_REPO/tools/verilator-v5.008/share/verilator/bin/"*; do
+    script_name=$(basename "$script")
+    if [[ ! -f "$CVA6_REPO/tools/verilator-v5.008/bin/$script_name" ]]; then
+      ln -sf "$script" "$CVA6_REPO/tools/verilator-v5.008/bin/$script_name"
+      echo "  Linked: $script_name"
+    fi
+  done
+  echo -e "\033[32m✓ Verilator bin scripts symlinked\033[0m"
 fi
 
 # Set Verilator environment variables BEFORE installing Spike
