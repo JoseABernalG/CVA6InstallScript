@@ -609,7 +609,8 @@ if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
 
 export PATH="~/.pyenv/bin:\$PATH"
 export PATH="~/.pyenv/shims:\$PATH"
-eval "$(pyenv init -)"
+echo 'eval "$(pyenv init -)"' >> ~/.bashrc
+echo 'eval "$(pyenv virtualenv-init -)"' >> ~/.bashrc
 
 export CVA6_REPO_DIR="$CVA6_REPO"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
