@@ -616,14 +616,14 @@ echo "  - iss_regr.log: Regression test comparison log"
 # ============================================================
 if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
   if ! grep -q "CVA6 Environment" "$HOME/.bashrc"; then
-    cat >> "$HOME/.bashrc" << EOF
+    cat >> "$HOME/.bashrc" << 'EOF'
 
 # ---- CVA6 Environment ----
 
-export PATH="~/.pyenv/bin:\$PATH"
-export PATH="~/.pyenv/shims:\$PATH"
-echo 'eval "$(pyenv init -)"' >> ~/.bashrc
-echo 'eval "$(pyenv virtualenv-init -)"' >> ~/.bashrc
+export PATH="~/.pyenv/bin:$PATH"
+export PATH="~/.pyenv/shims:$PATH"
+eval "$(pyenv init -)"
+eval "$(pyenv virtualenv-init -)"
 
 export CVA6_REPO_DIR="$CVA6_REPO"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
@@ -635,11 +635,11 @@ export RISCV="$RISCV"
 export INSTALL_DIR="$RISCV"
 
 # Set default variables to avoid unbound variable errors
-export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 
 
 # Add all tool paths to PATH
-export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:\$PATH"
+export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:$PATH"
 
 # Default simulation settings
 export DV_SIMULATORS=veri-testharness,spike
