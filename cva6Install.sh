@@ -614,16 +614,28 @@ echo "  - iss_regr.log: Regression test comparison log"
 # ============================================================
 # Environment persistence
 # ============================================================
-if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
-  if ! grep -q "CVA6 Environment" "$HOME/.bashrc"; then
+if ask_yes_no "Add Python Pyenv to ~/.bashrc?"; then
+  if ! grep -q "Pyenv Environment" "$HOME/.bashrc"; then
     cat >> "$HOME/.bashrc" << 'EOF'
 
-# ---- CVA6 Environment ----
+# ---- Python Pyenv Environment ----
 
-export PATH="~/.pyenv/bin:$PATH"
-export PATH="~/.pyenv/shims:$PATH"
-eval "$(pyenv init -)"
-eval "$(pyenv virtualenv-init -)"
+export PATH="~/.pyenv/bin:\$PATH"
+export PATH="~/.pyenv/shims:\$PATH"
+eval "\$(pyenv init -)"
+eval "\$(pyenv virtualenv-init -)"
+EOF
+    echo -e "\033[32m✓ Pyenv environment added to ~/.bashrc\033[0m"
+  else
+    echo -e "\033[32m✓ Pyenv environment already present in ~/.bashrc\033[0m"
+  fi
+fi
+
+if ask_yes_no "Add CVA6, RISCV, Verilator, and Spike to ~/.bashrc?"; then
+  if ! grep -q "CVA6 Environment" "$HOME/.bashrc"; then
+    cat >> "$HOME/.bashrc" << EOF
+
+# ---- CVA6 Environment ----
 
 export CVA6_REPO_DIR="$CVA6_REPO"
 export VERILATOR_ROOT="$VERILATOR_INSTALL_DIR"
@@ -635,16 +647,16 @@ export RISCV="$RISCV"
 export INSTALL_DIR="$RISCV"
 
 # Set default variables to avoid unbound variable errors
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
 
 
 # Add all tool paths to PATH
-export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:$PATH"
+export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:\$PATH"
 
 # Default simulation settings
 export DV_SIMULATORS=veri-testharness,spike
 export DV_TARGET=cv64a6_imafdc_sv39
-export DV_TESTLISTS="../tests/testlist_riscv-tests-$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-$DV_TARGET-v.yaml"
+export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
 EOF
     echo -e "\033[32m✓ CVA6 environment added to ~/.bashrc\033[0m"
   else
