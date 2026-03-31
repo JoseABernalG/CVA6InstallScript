@@ -495,11 +495,22 @@ if ask_yes_no "Source setup-env.sh for simulations?"; then
 fi
 
 if ask_yes_no "Run smoke tests now?"; then
-  $USE_PYTHON
-
   echo "Running smoke tests..."
   cd "$CVA6_REPO"
-  bash verif/regress/smoke-gen_tests.sh
+  
+  # Check if VCS is available, otherwise use Verilator
+  if command -v vcs &> /dev/null; then
+    echo "Using VCS simulator..."
+    bash verif/regress/smoke-gen_tests.sh
+  elif command -v verilator &> /dev/null; then
+    echo "VCS not found, using Verilator instead..."
+    export DV_SIMULATORS=veri-testharness
+    bash verif/regress/smoke-gen_tests.sh
+  else
+    echo "ERROR: Neither VCS nor Verilator is installed. Skipping smoke tests."
+    echo "  Install Verilator: apt-get install verilator"
+  fi
+  
   echo -e "\033[32m✓ Smoke tests completed\033[0m"
 else
   echo "Skipping smoke tests."
@@ -621,7 +632,6 @@ export INSTALL_DIR="$RISCV"
 
 # Set default variables to avoid unbound variable errors
 export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
-
 
 # Add all tool paths to PATH
 export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:\$PATH"

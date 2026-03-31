@@ -508,11 +508,22 @@ if ask_yes_no "Source setup-env.sh for simulations?"; then
 fi
 
 if ask_yes_no "Run smoke tests now?"; then
-  $USE_PYTHON
-
   echo "Running smoke tests..."
   cd "$CVA6_REPO"
-  bash verif/regress/smoke-gen_tests.sh
+  
+  # Check if VCS is available, otherwise use Verilator
+  if command -v vcs &> /dev/null; then
+    echo "Using VCS simulator..."
+    bash verif/regress/smoke-gen_tests.sh
+  elif command -v verilator &> /dev/null; then
+    echo "VCS not found, using Verilator instead..."
+    export DV_SIMULATORS=veri-testharness
+    bash verif/regress/smoke-gen_tests.sh
+  else
+    echo "ERROR: Neither VCS nor Verilator is installed. Skipping smoke tests."
+    echo "  Install Verilator: apt-get install verilator"
+  fi
+  
   echo -e "\033[32m✓ Smoke tests completed\033[0m"
 else
   echo "Skipping smoke tests."
@@ -620,10 +631,10 @@ if ask_yes_no "Add Python Pyenv to ~/.bashrc?"; then
 
 # ---- Python Pyenv Environment ----
 
-export PATH="~/.pyenv/bin:\$PATH"
-export PATH="~/.pyenv/shims:\$PATH"
-eval "\$(pyenv init -)"
-eval "\$(pyenv virtualenv-init -)"
+export PATH="~/.pyenv/bin:$PATH"
+export PATH="~/.pyenv/shims:$PATH"
+eval "$(pyenv init -)"
+eval "$(pyenv virtualenv-init -)"
 EOF
     echo -e "\033[32m✓ Pyenv environment added to ~/.bashrc\033[0m"
   else
@@ -649,7 +660,6 @@ export INSTALL_DIR="$RISCV"
 # Set default variables to avoid unbound variable errors
 export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
 
-
 # Add all tool paths to PATH
 export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:\$PATH"
 
@@ -657,6 +667,7 @@ export PATH="$VERILATOR_INSTALL_DIR/bin:$SPIKE_INSTALL_DIR/bin:$RISCV/bin:\$PATH
 export DV_SIMULATORS=veri-testharness,spike
 export DV_TARGET=cv64a6_imafdc_sv39
 export DV_TESTLISTS="../tests/testlist_riscv-tests-\$DV_TARGET-p.yaml ../tests/testlist_riscv-tests-\$DV_TARGET-v.yaml"
+export TRACE_FAST=1
 EOF
     echo -e "\033[32m✓ CVA6 environment added to ~/.bashrc\033[0m"
   else
@@ -688,6 +699,8 @@ if $USE_PYTHON; then
   echo "To activate Python venv:"
   echo "  pyenv activate cva6"
   echo ""
+  echo "TRACE_FAST=1 will generate VCD/FST waveform files in the simulation output directories."
+  echo "TRACE_FAST enabled by default in this installation. To disable, unset TRACE_FAST or set it to 0 before running simulations."
 fi
 echo "To set environment for future sessions:"
 echo "  The environment is already configured in ~/.bashrc"
