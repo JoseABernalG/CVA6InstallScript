@@ -631,7 +631,8 @@ if ask_yes_no "Generate waveforms for cv32a65x (TRACE_FAST)?"; then
     ../tests/custom/common/crt.S -lgcc \
     -I../tests/custom/env -I../tests/custom/common -march=rv32imc -mabi=ilp32"
   cd "$CVA6_REPO"
-  echo -e "\033[32m✓ cv32a65x waveforms completed\033[0m"
+  echo -e "\033[32m✓ cv32a65x waveform generation configured\033[0m"
+  echo "  Run manually: cd verif/sim && bash smoke-tests-cv32a65x.sh"
 fi
 
 # Waveform generation for cv32a6_imac_sv32
@@ -648,7 +649,8 @@ if ask_yes_no "Generate waveforms for cv32a6_imac_sv32 (TRACE_FAST)?"; then
     ../tests/custom/common/crt.S -lgcc \
     -I../tests/custom/env -I../tests/custom/common -march=rv32imac -mabi=ilp32"
   cd "$CVA6_REPO"
-  echo -e "\033[32m✓ cv32a6_imac_sv32 waveforms completed\033[0m"
+  echo -e "\033[32m✓ cv32a6_imac_sv32 waveform generation configured\033[0m"
+  echo "  Run manually: cd verif/sim && bash smoke-tests-cv32a6_imac_sv32.sh"
 fi
 
 # Waveform generation for cv64a6_imafdc_sv39
@@ -656,8 +658,9 @@ if ask_yes_no "Generate waveforms for cv64a6_imafdc_sv39 (TRACE_FAST)?"; then
   export DV_SIMULATORS=veri-testharness,spike
   export DV_TARGET=cv64a6_imafdc_sv39
   export TRACE_FAST=1
-  echo -e "\033[32m✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)\033[0m"
-  echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
+  echo -e "\033[32m✓ cv64a6_imafdc_sv39 waveform generation configured\033[0m"
+  echo "  Run manually: cd verif/sim && bash smoke-tests-cv64a6_imafdc_sv39.sh"
+  echo "  Waveforms: ./verif/sim/out_YEAR-MONTH-DAY/*.vcd or *.fst"
 fi
 
 # Coverage and Verification Plan (VCS only)
