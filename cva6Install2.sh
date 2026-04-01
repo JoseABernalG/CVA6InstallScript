@@ -2,6 +2,38 @@
 set -euo pipefail
 
 # ============================================================
+# Check for Xilinx Vivado settings and disable during installation
+# ============================================================
+echo ""
+echo "=============================================="
+echo "  Xilinx Vivado Detection"
+echo "=============================================="
+VIVADO_LINE=$(grep -n "source.*settings64" "$HOME/.bashrc" 2>/dev/null | head -1 || true)
+if [[ -n "$VIVADO_LINE" ]]; then
+  VIVADO_LINENUM=$(echo "$VIVADO_LINE" | cut -d: -f1)
+  echo "NOTE: Found Vivado settings in ~/.bashrc (line $VIVADO_LINENUM)"
+  echo "  This can cause conflicts with the CVA6 installation."
+  echo "  I will temporarily comment this line during installation."
+  echo "  At the end, I will restore it and tell you to reload your terminal."
+  while true; do
+    read -p "Continue with installation? (y/n): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      break
+    elif [[ $REPLY =~ ^[Nn]$ ]]; then
+      echo "Installation cancelled by user."
+      exit 1
+    fi
+    echo "Please answer 'y' or 'n'."
+  done
+  # Comment the line
+  sed -i "${VIVADO_LINENUM}s/^/#/" "$HOME/.bashrc"
+  echo "✓ Vivado settings line $VIVADO_LINENUM temporarily commented"
+else
+  echo "No Vivado settings found in ~/.bashrc - proceeding."
+fi
+
+# ============================================================
 # CVA6 Installation Script
 # ============================================================
 # For known issues (especially on Kali Linux), see:
@@ -585,9 +617,44 @@ if ask_yes_no "Run riscv-arch-test regression suite?"; then
   echo -e "\033[32m✓ riscv-arch-test regression completed\033[0m"
 fi
 
-# Waveform generation
-if ask_yes_no "Enable waveform generation (TRACE_FAST)?"; then
+# Waveform generation for cv32a65x
+if ask_yes_no "Generate waveforms for cv32a65x (TRACE_FAST)?"; then
+  export DV_SIMULATORS=veri-testharness
+  export DV_TARGET=cv32a65x
+  export TRACE_FAST=1
+  cd ./verif/sim
+  python3 cva6.py --target cv32a60x --iss=$DV_SIMULATORS --iss_yaml=cva6.yaml \
+    --c_tests ../tests/custom/hello_world/hello_world.c \
+    --linker=../../config/gen_from_riscv_config/linker/link.ld \
+    --gcc_opts="-static -mcmodel=medany -fvisibility=hidden -nostdlib \
+    -nostartfiles -g ../tests/custom/common/syscalls.c \
+    ../tests/custom/common/crt.S -lgcc \
+    -I../tests/custom/env -I../tests/custom/common -march=rv32imc -mabi=ilp32"
+  cd "$CVA6_REPO"
+  echo -e "\033[32m✓ cv32a65x waveforms completed\033[0m"
+fi
+
+# Waveform generation for cv32a6_imac_sv32
+if ask_yes_no "Generate waveforms for cv32a6_imac_sv32 (TRACE_FAST)?"; then
+  export DV_SIMULATORS=veri-testharness
+  export DV_TARGET=cv32a6_imac_sv32
+  export TRACE_FAST=1
+  cd ./verif/sim
+  python3 cva6.py --target cv32a6_imac --iss=$DV_SIMULATORS --iss_yaml=cva6.yaml \
+    --c_tests ../tests/custom/hello_world/hello_world.c \
+    --linker=../../config/gen_from_riscv_config/linker/link.ld \
+    --gcc_opts="-static -mcmodel=medany -fvisibility=hidden -nostdlib \
+    -nostartfiles -g ../tests/custom/common/syscalls.c \
+    ../tests/custom/common/crt.S -lgcc \
+    -I../tests/custom/env -I../tests/custom/common -march=rv32imac -mabi=ilp32"
+  cd "$CVA6_REPO"
+  echo -e "\033[32m✓ cv32a6_imac_sv32 waveforms completed\033[0m"
+fi
+
+# Waveform generation for cv64a6_imafdc_sv39
+if ask_yes_no "Generate waveforms for cv64a6_imafdc_sv39 (TRACE_FAST)?"; then
   export DV_SIMULATORS=veri-testharness,spike
+  export DV_TARGET=cv64a6_imafdc_sv39
   export TRACE_FAST=1
   echo -e "\033[32m✓ TRACE_FAST=1 enabled (VCD/FST files will be generated)\033[0m"
   echo "  Logs and waveforms: ./verif/sim/out_YEAR-MONTH-DAY/"
@@ -608,6 +675,18 @@ echo "  - spike_sim/: Spike simulation logs"
 echo "  - veri_testharness_sim/: Verilator simulation logs"
 echo "  - veri-testharness-pk_sim/: Proxy kernel simulation logs"
 echo "  - iss_regr.log: Regression test comparison log"
+
+# ============================================================
+# Restore Vivado settings (uncomment at the end)
+# ============================================================
+VIVADO_LINE_COMMENTED=$(grep -n "^#.*source.*settings64" "$HOME/.bashrc" 2>/dev/null | head -1 || true)
+if [[ -n "$VIVADO_LINE_COMMENTED" ]]; then
+  VIVADO_LINENUM=$(echo "$VIVADO_LINE_COMMENTED" | cut -d: -f1)
+  sed -i "${VIVADO_LINENUM}s/^#//" "$HOME/.bashrc"
+  echo "NOTICE: Vivado settings line uncommented in ~/.bashrc"
+  echo "  (Line $VIVADO_LINENUM restored)"
+  echo "  Please reload your terminal: source ~/.bashrc"
+fi
 
 # ============================================================
 # Environment persistence
