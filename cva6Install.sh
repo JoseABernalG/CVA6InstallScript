@@ -481,7 +481,7 @@ if ask_yes_no "Run smoke tests now?"; then
     bash verif/regress/smoke-gen_tests.sh
   elif command -v verilator &> /dev/null; then
     echo "VCS not found, using Verilator instead..."
-    export DV_SIMULATORS=veri-testharness
+    export DV_SIMULATORS=veri-testharness,spike
     bash verif/regress/smoke-gen_tests.sh
   else
     echo "ERROR: Neither VCS nor Verilator is installed. Skipping smoke tests."
@@ -521,7 +521,7 @@ fi
 
 # Hello World simulation
 if ask_yes_no "Run hello_world simulation?"; then
-  export DV_SIMULATORS=veri-testharness
+  export DV_SIMULATORS=veri-testharness,spike
   
   # Check if toolchain supports required extensions
   MARCH_FLAGS="-march=rv32imc_zba_zbb_zbs_zbc_zicsr_zifencei"
@@ -544,7 +544,7 @@ fi
 
 # RISC-V Proxy Kernel simulation (for printf support)
 if ask_yes_no "Run veri-testharness-pk simulation?"; then
-  export DV_SIMULATORS=veri-testharness-pk
+  export DV_SIMULATORS=veri-testharness-pk,spike
   bash verif/regress/veri-testharness-pk-tests.sh
   echo -e "\033[32m✓ veri-testharness-pk simulation completed\033[0m"
 fi
@@ -564,7 +564,7 @@ fi
 
 # Waveform generation for cv32a65x
 if ask_yes_no "Generate waveforms for cv32a65x (TRACE_FAST)?"; then
-  export DV_SIMULATORS=veri-testharness
+  export DV_SIMULATORS=veri-testharness,spike
   export DV_TARGET=cv32a65x
   export TRACE_FAST=1
   cd "$CVA6_REPO"
@@ -574,7 +574,7 @@ fi
 
 # Waveform generation for cv32a6_imac_sv32
 if ask_yes_no "Generate waveforms for cv32a6_imac_sv32 (TRACE_FAST)?"; then
-  export DV_SIMULATORS=veri-testharness
+  export DV_SIMULATORS=veri-testharness,spike
   export DV_TARGET=cv32a6_imac_sv32
   export TRACE_FAST=1
   cd "$CVA6_REPO"
